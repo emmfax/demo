@@ -12,6 +12,7 @@ apk add bash socat curl tar coreutils openrc tzdata
 echo "Step 2: 设置系统时区为北京时间..."
 cp /usr/share/zoneinfo/$TIMEZONE /etc/localtime
 echo "$TIMEZONE" > /etc/timezone
+export TZ="$TIMEZONE"
 
 echo "Step 3: 确保安装目录存在..."
 mkdir -p "$INSTALL_DIR"
@@ -37,8 +38,8 @@ start_pre() {
 
 start() {
     ebegin "Starting S-UI"
-    # nohup 后台启动，日志写入 /var/log/s-ui.log
-    nohup "$command" > /var/log/s-ui.log 2>&1 &
+    # nohup 后台启动，日志写入 /var/log/s-ui.log，并指定北京时间 TZ
+    nohup env TZ="Asia/Shanghai" "$command" > /var/log/s-ui.log 2>&1 &
     echo $! > "$pidfile"
     eend 0
 }
