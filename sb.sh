@@ -1,18 +1,22 @@
 #!/bin/sh
-# Alpine Linux 一键 S-UI post-install & 启动脚本
-# 适用于手动已安装 S-UI 的情况
+# Alpine Linux 一键 S-UI 后置启动脚本（北京时间 Asia/Shanghai）
 
 INSTALL_DIR="/usr/local/s-ui"
 LOG_FILE="/var/log/s-ui.log"
+TIMEZONE="Asia/Shanghai"  # 默认北京时间
 
 echo "Step 1: 安装必要依赖..."
 apk update
-apk add bash socat curl tar coreutils openrc
+apk add bash socat curl tar coreutils openrc tzdata
 
-echo "Step 2: 确保安装目录存在..."
+echo "Step 2: 设置系统时区为北京时间..."
+cp /usr/share/zoneinfo/$TIMEZONE /etc/localtime
+echo "$TIMEZONE" > /etc/timezone
+
+echo "Step 3: 确保安装目录存在..."
 mkdir -p "$INSTALL_DIR"
 
-echo "Step 3: 创建 OpenRC 服务..."
+echo "Step 4: 创建 OpenRC 服务..."
 cat <<'EOF' > /etc/init.d/s-ui
 #!/sbin/openrc-run
 # Alpine OpenRC service for S-UI
@@ -50,14 +54,12 @@ stop() {
 EOF
 
 chmod +x /etc/init.d/s-ui
-
-# 添加开机启动
 rc-update add s-ui default
 
-echo "Step 4: 启动 S-UI..."
+echo "Step 5: 启动 S-UI 服务..."
 rc-service s-ui restart
 
-echo "Step 5: 检查 S-UI 是否运行..."
+echo "Step 6: 检查 S-UI 状态..."
 if pgrep -f sui >/dev/null; then
     echo "S-UI 已经在运行！"
     echo "日志文件：$LOG_FILE"
@@ -65,5 +67,5 @@ else
     echo "S-UI 启动失败！请检查日志：$LOG_FILE"
 fi
 
-echo "脚本执行完成。OpenRC 已设置 S-UI 开机自启。"
-echo "使用命令查看面板 URL：/usr/local/s-ui/sui uri"
+echo "安装完成。开机自启已配置。"
+echo "查看面板 URL：/usr/local/s-ui/sui uri"
