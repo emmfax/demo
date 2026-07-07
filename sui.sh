@@ -1,1180 +1,283 @@
 #!/bin/sh
+# s-ui mini manager
+# github: emmfax/demo
 
-# s-ui lightweight manager
-# Alpine / Debian optimized
+VER="1.0"
+CONF="/etc/suio.conf"
+BIN="/usr/local/bin/suio"
+SCRIPT="/usr/local/bin/sui.sh"
 
-VERSION="1.0"
+[ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
 
-BASE_DIR="/usr/local/s-ui"
-BIN_LINK="/usr/local/bin/suio"
-SCRIPT_PATH="/usr/local/bin/sui.sh"
+GREEN="\033[32m"
+RED="\033[31m"
+NC="\033[0m"
 
-DEFAULT_REPO="alireza0/s-ui"
+ok(){ echo "${GREEN}$1${NC}"; }
+err(){ echo "${RED}$1${NC}"; }
 
-SUI_REPO="$DEFAULT_REPO"
-
-
-red(){
-    printf "\033[31m%s\033[0m\n" "$1"
+load(){
+[ -f "$CONF" ]&&. "$CONF"
+REPO_USER=${REPO_USER:-alireza0}
+REPO_NAME=${REPO_NAME:-s-ui}
+PATH_SUI=${PATH_SUI:-/usr/local/s-ui}
+PORT=${PORT:-2095}
+USER=${USER:-admin}
+PASS=${PASS:-admin}
 }
 
-green(){
-    printf "\033[32m%s\033[0m\n" "$1"
+save(){
+cat >$CONF <<EOF
+REPO_USER=$REPO_USER
+REPO_NAME=$REPO_NAME
+PATH_SUI=$PATH_SUI
+PORT=$PORT
+USER=$USER
+PASS=$PASS
+EOF
 }
 
-yellow(){
-    printf "\033[33m%s\033[0m\n" "$1"
+sui_exist(){
+[ -d "$PATH_SUI" ]||[ -f "/etc/systemd/system/s-ui.service" ]||[ -f "/etc/init.d/s-ui" ]
 }
 
-
-pause(){
-    printf "\n按回车继续..."
-    read _
+dep(){
+apk update >/dev/null 2>&1&&apk add curl wget tar unzip bash >/dev/null 2>&1
+command -v apt >/dev/null&&apt update -y >/dev/null 2>&1&&apt install -y curl wget tar unzip bash >/dev/null 2>&1
 }
 
-
-clear_cache(){
-
-    rm -rf /tmp/*sui* 2>/dev/null
-    rm -rf /tmp/*.tar.gz 2>/dev/null
-
-}
-
-
-
-check_root(){
-
-    if [ "$(id -u)" != "0" ]; then
-        red "请使用root运行"
-        exit 1
-    fi
-
-}
-
-
-
-detect_sui(){
-
-    if [ -f "/usr/local/s-ui/s-ui" ] ||
-       [ -f "/usr/bin/s-ui" ] ||
-       command -v s-ui >/dev/null 2>&1
-    then
-        echo "yes"
-    else
-        echo "no"
-    fi
-
-}
-
-
-
-detect_system(){
-
-    if command -v apk >/dev/null 2>&1
-    then
-        OS="alpine"
-    elif command -v apt >/dev/null 2>&1
-    then
-        OS="debian"
-    else
-        OS="unknown"
-    fi
-
-}
-
-
-
-install_dep(){
-
-echo "检测依赖..."
-
-if [ "$OS" = "alpine" ]; then
-
-    apk update >/dev/null 2>&1
-
-    apk add \
-    curl \
-    wget \
-    tar \
-    gzip \
-    bash \
-    ca-certificates \
-    jq \
-    unzip >/dev/null 2>&1
-
-
-elif [ "$OS" = "debian" ]; then
-
-
-    apt update >/dev/null 2>&1
-
-    DEBIAN_FRONTEND=noninteractive apt install -y \
-    curl \
-    wget \
-    tar \
-    gzip \
-    bash \
-    ca-certificates \
-    jq \
-    unzip >/dev/null 2>&1
-
-
+service_start(){
+if command -v systemctl >/dev/null;then
+systemctl daemon-reload
+systemctl enable s-ui >/dev/null 2>&1
+systemctl restart s-ui
+elif command -v rc-update >/dev/null;then
+rc-update add s-ui default >/dev/null 2>&1
+rc-service s-ui restart
 fi
-
 }
 
-
-
-get_repo(){
-
-    echo "$SUI_REPO"
-
+service_stop(){
+systemctl stop s-ui 2>/dev/null
+rc-service s-ui stop 2>/dev/null
 }
-
-
-
-parse_repo(){
-
-url="$1"
-
-url=$(echo "$url" | sed 's#https://github.com/##')
-
-url=$(echo "$url" | sed 's#/$##')
-
-SUI_REPO="$url"
-
-}
-
-
-
-show_repo(){
-
-echo
-
-echo "当前仓库:"
-echo "$SUI_REPO"
-
-}
-
-
-
-download_release(){
-
-
-repo=$(get_repo)
-
-
-echo "获取版本..."
-
-api="https://api.github.com/repos/$repo/releases"
-
-
-VERSIONS=$(curl -fsSL "$api" \
-| jq -r '.[].tag_name' 2>/dev/null)
-
-
-if [ -z "$VERSIONS" ]; then
-
-    red "无法获取版本"
-    return 1
-
-fi
-
-
-echo
-
-echo "可用版本:"
-
-i=1
-
-for v in $VERSIONS
-do
-
-echo "$i) $v"
-
-eval "ver$i=$v"
-
-i=$((i+1))
-
-done
-
-
-echo
-
-printf "选择版本:"
-read num
-
-
-VERSION_SELECT=$(eval echo \$ver$num)
-
-
-if [ -z "$VERSION_SELECT" ]; then
-
-red "选择错误"
-return 1
-
-fi
-
-
-echo
-
-echo "选择:"
-echo "$VERSION_SELECT"
-
-
-
-}
-
-
-
-arch_detect(){
-
-
-ARCH=$(uname -m)
-
-
-case "$ARCH" in
-
-x86_64)
-ARCH="amd64"
-;;
-
-aarch64)
-ARCH="arm64"
-;;
-
-armv7*)
-ARCH="arm"
-;;
-
-*)
-ARCH="amd64"
-;;
-
-esac
-
-
-}
-
 
 install_sui(){
+load
+dep
+mkdir -p "$PATH_SUI"
 
-clear_cache
+echo "当前仓库:"
+echo "https://github.com/$REPO_USER/$REPO_NAME"
+read -p "输入版本(留空最新版): " VERSION
 
-install_dep
-
-arch_detect
-
-download_release || return
-
-
-mkdir -p "$BASE_DIR"
-
-
-echo
-echo "请输入安装路径"
-printf "默认 [%s]: " "$BASE_DIR"
-read input
-
-if [ -n "$input" ]; then
-    BASE_DIR="$input"
+if [ -z "$VERSION" ];then
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/s-ui-linux-amd64.tar.gz"
+else
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/download/$VERSION/s-ui-linux-amd64.tar.gz"
 fi
-
-
-echo
-echo "开始下载..."
-
-repo=$(get_repo)
-
-
-# 获取下载地址
-URL=$(curl -fsSL \
-"https://api.github.com/repos/$repo/releases/tags/$VERSION_SELECT" \
-| jq -r '.assets[].browser_download_url' \
-| grep -Ei "$ARCH|linux" \
-| head -n 1)
-
-
-if [ -z "$URL" ]; then
-
-    red "未找到对应架构文件"
-
-    return 1
-
-fi
-
-
-echo
 
 echo "下载:"
-echo "$URL"
+wget -O /tmp/sui.tar.gz "$URL"
 
-TMP="/tmp/s-ui.tar.gz"
-
-
-rm -f "$TMP"
-
-
-curl -L \
---progress-bar \
--o "$TMP" \
-"$URL"
-
-
-
-if [ ! -s "$TMP" ]; then
-
-    red "下载失败"
-
-    return 1
-
+if [ $? != 0 ];then
+err "下载失败"
+exit 1
 fi
 
+tar zxvf /tmp/sui.tar.gz -C "$PATH_SUI"
 
-
-echo
-
-echo "解压中..."
-
-
-
-# 低内存解压
-tar \
---no-same-owner \
--xzf "$TMP" \
--C "$BASE_DIR" 2>/dev/null
-
-
-
-if [ $? != 0 ]; then
-
-    red "解压失败"
-
-    return 1
-
-fi
-
-
-
-rm -f "$TMP"
-
-
-
-chmod +x "$BASE_DIR"/s-ui* 2>/dev/null
-
-
+chmod +x "$PATH_SUI"/*
 
 echo
+read -p "端口 [$PORT]: " x
+[ -n "$x" ]&&PORT=$x
 
-echo "设置账号"
+read -p "用户名 [$USER]: " x
+[ -n "$x" ]&&USER=$x
 
+read -p "密码 [$PASS]: " x
+[ -n "$x" ]&&PASS=$x
 
+read -p "安装路径 [$PATH_SUI]: " x
+[ -n "$x" ]&&PATH_SUI=$x
 
-printf "管理端口:"
-read PORT
-
-
-[ -z "$PORT" ] && PORT="2095"
-
-
-
-printf "用户名:"
-read USER
-
-
-[ -z "$USER" ] && USER="admin"
-
-
-
-printf "密码:"
-read PASS
-
-
-[ -z "$PASS" ] && PASS="admin"
-
-
-
-echo
-
-
-create_config
-
-
+save
 
 create_service
 
+service_start
 
+create_cmd
 
-green "安装完成"
-
-
-
-printf "是否开机启动?(y/n): "
-
-read boot
-
-
-case "$boot" in
-
-y|Y)
-
-enable_service
-
-;;
-
-esac
-
-
-
+ok "安装完成"
 }
-
-
-
-create_config(){
-
-
-CONF="$BASE_DIR/config.json"
-
-
-if [ ! -f "$CONF" ]; then
-
-
-cat > "$CONF" <<EOF
-{
-"port":"$PORT",
-"username":"$USER",
-"password":"$PASS"
-}
-EOF
-
-
-fi
-
-
-}
-
-
 
 create_service(){
 
+if command -v systemctl >/dev/null;then
 
-if [ "$OS" = "debian" ]; then
-
-
-cat > /etc/systemd/system/s-ui.service <<EOF
+cat >/etc/systemd/system/s-ui.service <<EOF
 [Unit]
 Description=s-ui
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=$BASE_DIR
-ExecStart=$BASE_DIR/s-ui
+WorkingDirectory=$PATH_SUI
+ExecStart=$PATH_SUI/s-ui
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+else
 
-systemctl daemon-reload
-
-
-
-elif [ "$OS" = "alpine" ]; then
-
-
-
-cat > /etc/init.d/s-ui <<EOF
+cat >/etc/init.d/s-ui <<EOF
 #!/sbin/openrc-run
-
-name="s-ui"
-
-command="$BASE_DIR/s-ui"
-
-command_background="yes"
-
+command="$PATH_SUI/s-ui"
+command_background=true
 pidfile="/run/s-ui.pid"
-
 EOF
-
 
 chmod +x /etc/init.d/s-ui
 
-
 fi
-
-
-
 }
 
-
-
-enable_service(){
-
-
-if [ "$OS" = "debian" ]; then
-
-systemctl enable s-ui >/dev/null 2>&1
-systemctl restart s-ui
-
-
-elif [ "$OS" = "alpine" ]; then
-
-rc-update add s-ui default >/dev/null 2>&1
-rc-service s-ui restart
-
-
-fi
-
-
-}
-
-
-
-start_service(){
-
-
-if [ "$OS" = "debian" ]; then
-
-systemctl start s-ui
-
-
-else
-
-rc-service s-ui start
-
-
-fi
-
-
-}
-
-
-
-stop_service(){
-
-
-if [ "$OS" = "debian" ]; then
-
-systemctl stop s-ui
-
-
-else
-
-rc-service s-ui stop
-
-
-fi
-
-
-}
-
-
-
-restart_service(){
-
-
-if [ "$OS" = "debian" ]; then
-
-systemctl restart s-ui
-
-
-else
-
-rc-service s-ui restart
-
-
-fi
-
-
-}
-
-
-
-status_service(){
-
-
-if [ "$OS" = "debian" ]; then
-
-systemctl status s-ui --no-pager
-
-
-else
-
-rc-service s-ui status
-
-
-fi
-
-
-}
-
-
-
-uninstall_sui(){
-
-
-echo
-
-printf "确认卸载?(y/n): "
-
-read c
-
-
-case "$c" in
-
-y|Y)
-
-
-stop_service
-
-
-if [ "$OS" = "debian" ]; then
-
-systemctl disable s-ui >/dev/null 2>&1
-rm -f /etc/systemd/system/s-ui.service
-systemctl daemon-reload
-
-
-else
-
-rc-update del s-ui default >/dev/null 2>&1
-rm -f /etc/init.d/s-ui
-
-
-fi
-
-
-
-rm -rf "$BASE_DIR"
-
-
-green "已卸载"
-
-
-;;
-
-esac
-
-
-}
-
-
-upgrade_sui(){
-
-echo "升级 s-ui"
-
-download_release || return
-
-
-echo "下载新版..."
-
-repo=$(get_repo)
-
-
-URL=$(curl -fsSL \
-"https://api.github.com/repos/$repo/releases/tags/$VERSION_SELECT" \
-| jq -r '.assets[].browser_download_url' \
-| grep -Ei "$ARCH|linux" \
-| head -n 1)
-
-
-if [ -z "$URL" ]; then
-
-red "没有找到下载文件"
-
-return
-
-fi
-
-
-TMP="/tmp/s-ui-upgrade.tar.gz"
-
-
-rm -f "$TMP"
-
-
-curl -L \
---progress-bar \
--o "$TMP" \
-"$URL"
-
-
-
-if [ ! -s "$TMP" ]; then
-
-red "下载失败"
-
-return
-
-fi
-
-
-
-stop_service
-
-
-
-echo "替换文件..."
-
-tar \
---no-same-owner \
--xzf "$TMP" \
--C "$BASE_DIR"
-
-
-
-rm -f "$TMP"
-
-
-chmod +x "$BASE_DIR"/s-ui* 2>/dev/null
-
-
-start_service
-
-
-green "升级完成"
-
-
-}
-
-
-
-
-modify_value(){
-
-
-CONF="$BASE_DIR/config.json"
-
-
-if [ ! -f "$CONF" ]; then
-
-red "没有找到配置文件"
-
-return
-
-fi
-
-
-}
-
-
-
-modify_port(){
-
-
-printf "新端口:"
-read NEW
-
-
-sed -i \
-"s/\"port\":\"[^\"]*\"/\"port\":\"$NEW\"/" \
-"$BASE_DIR/config.json"
-
-
-restart_service
-
-
-green "端口修改完成"
-
-
-}
-
-
-
-modify_user(){
-
-
-printf "新用户名:"
-read NEW
-
-
-sed -i \
-"s/\"username\":\"[^\"]*\"/\"username\":\"$NEW\"/" \
-"$BASE_DIR/config.json"
-
-
-restart_service
-
-
-green "用户名修改完成"
-
-
-}
-
-
-
-modify_pass(){
-
-
-printf "新密码:"
-read NEW
-
-
-sed -i \
-"s/\"password\":\"[^\"]*\"/\"password\":\"$NEW\"/" \
-"$BASE_DIR/config.json"
-
-
-restart_service
-
-
-green "密码修改完成"
-
-
-}
-
-
-
-
-modify_path(){
-
-
-printf "新路径:"
-read NEW
-
-
-if [ -z "$NEW" ]; then
-return
-fi
-
-
-stop_service
-
-
-mv "$BASE_DIR" "$NEW"
-
-
-BASE_DIR="$NEW"
-
-
-sed -i \
-"s#WorkingDirectory=.*#WorkingDirectory=$BASE_DIR#" \
-/etc/systemd/system/s-ui.service 2>/dev/null
-
-
-
-sed -i \
-"s#ExecStart=.*#ExecStart=$BASE_DIR/s-ui#" \
-/etc/systemd/system/s-ui.service 2>/dev/null
-
-
-
-systemctl daemon-reload 2>/dev/null
-
-
-
-start_service
-
-
-
-green "路径修改完成"
-
-
-
-}
-
-
-
-
-change_repo(){
-
-
-echo
-
-echo "当前仓库:"
-echo "$SUI_REPO"
-
-
-echo
-
-echo "输入GitHub仓库地址"
-
-echo "例如:"
-echo "https://github.com/alireza0/s-ui"
-
-
-printf "> "
-
-read URL
-
-
-if [ -n "$URL" ]; then
-
-
-parse_repo "$URL"
-
-
-sed -i \
-"s#^SUI_REPO=.*#SUI_REPO=\"$SUI_REPO\"#" \
-"$SCRIPT_PATH"
-
-
-green "仓库修改完成"
-
-
-fi
-
-
-
-}
-
-
-
-
-install_shortcut(){
-
-
-cp "$0" "$SCRIPT_PATH"
-
-
-cat > "$BIN_LINK" <<EOF
+create_cmd(){
+cat >$BIN <<EOF
 #!/bin/sh
-bash $SCRIPT_PATH
+cd $PATH_SUI
+echo "s-ui path:$PATH_SUI"
 EOF
+chmod +x $BIN
+}
 
+uninstall(){
+load
+service_stop
+rm -rf "$PATH_SUI"
+rm -f /etc/systemd/system/s-ui.service
+rm -f /etc/init.d/s-ui
+systemctl daemon-reload 2>/dev/null
+rm -f $BIN
+rm -f $CONF
+ok "已卸载"
+}
 
-chmod +x "$BIN_LINK"
+upgrade(){
 
+load
 
+echo "升级仓库:"
+echo "$REPO_USER/$REPO_NAME"
+
+install_sui
 
 }
 
+status(){
+systemctl status s-ui --no-pager 2>/dev/null||rc-service s-ui status 2>/dev/null
+}
 
+change_port(){
+load
+read -p "新端口:" PORT
+save
+echo "请进入s-ui面板修改端口"
+}
 
+change_user(){
+load
+read -p "新用户名:" USER
+save
+echo "请进入s-ui面板修改"
+}
+
+change_pass(){
+load
+read -p "新密码:" PASS
+save
+echo "请进入s-ui面板修改"
+}
+
+change_path(){
+load
+read -p "新路径:" p
+[ -n "$p" ]&&PATH_SUI=$p
+save
+echo "路径已保存，请手动迁移目录"
+}
+
+repo(){
+load
+read -p "GitHub用户名 [$REPO_USER]:" x
+[ -n "$x" ]&&REPO_USER=$x
+
+read -p "仓库名 [$REPO_NAME]:" x
+[ -n "$x" ]&&REPO_NAME=$x
+
+save
+ok "仓库修改完成"
+}
 
 remove_script(){
 
+rm -f $SCRIPT
+rm -f $BIN
+rm -f $CONF
 
-echo
-
-printf "删除管理脚本和快捷命令?(y/n): "
-
-read c
-
-
-case "$c" in
-
-y|Y)
-
-rm -f "$BIN_LINK"
-rm -f "$SCRIPT_PATH"
-
-green "删除完成"
-
-;;
-
-esac
-
-
-
+ok "脚本清理完成"
+exit
 }
-
-
 
 menu(){
 
-
-while true
-
-do
-
+load
 
 clear
 
-
+echo "======================"
+echo "      s-ui 管理器"
 echo "======================"
 
-echo " s-ui 管理脚本"
-
-echo "======================"
-
-
-if [ "$(detect_sui)" = "yes" ]; then
-
-green "状态: 已安装"
-
+if sui_exist;then
+echo "状态: 已安装"
 else
-
-yellow "状态: 未安装"
-
+echo "状态: 未安装"
 fi
 
-
 echo
-
-echo "仓库:"
-echo "$SUI_REPO"
-
-
-echo
-
-echo "1. 安装 s-ui"
-
-echo "2. 卸载 s-ui"
-
-echo "3. 升级 s-ui"
-
-echo "4. 修改端口"
-
-echo "5. 修改用户名"
-
-echo "6. 修改密码"
-
-echo "7. 修改安装路径"
-
-echo "8. 查看状态"
-
-echo "9. 修改安装仓库"
-
-echo "10. 删除脚本和快捷命令"
-
-echo "0. 退出"
-
-
-echo
-
-printf "选择: "
-
-read choice
-
-
-
-case "$choice" in
-
-
-1)
-
-install_sui
-pause
-
-;;
-
-
-2)
-
-uninstall_sui
-pause
-
-;;
-
-
-3)
-
-upgrade_sui
-pause
-
-;;
-
-
-4)
-
-modify_port
-pause
-
-;;
-
-
-5)
-
-modify_user
-pause
-
-;;
-
-
-6)
-
-modify_pass
-pause
-
-;;
-
-
-7)
-
-modify_path
-pause
-
-;;
-
-
-8)
-
-status_service
-pause
-
-;;
-
-
-9)
-
-change_repo
-pause
-
-;;
-
-
-10)
-
-remove_script
-exit
-
-;;
-
-
-0)
-
-exit
-
-;;
-
-
-*)
-
-echo "错误"
-
-;;
-
+echo "1.安装 s-ui"
+echo "2.卸载 s-ui"
+echo "3.升级 s-ui"
+echo "4.修改端口"
+echo "5.修改用户名"
+echo "6.修改密码"
+echo "7.修改路径"
+echo "8.查看状态"
+echo "9.修改安装仓库"
+echo "10.删除脚本"
+echo "0.退出"
+
+read -p "选择:" n
+
+case $n in
+1)install_sui;;
+2)uninstall;;
+3)upgrade;;
+4)change_port;;
+5)change_user;;
+6)change_pass;;
+7)change_path;;
+8)status;;
+9)repo;;
+10)remove_script;;
+0)exit;;
+*)menu;;
 esac
-
-
-done
-
-
 }
-
-
-
-main(){
-
-
-check_root
-
-
-detect_system
-
-
-if [ "$OS" = "unknown" ]; then
-
-red "不支持当前系统"
-
-exit
-
-fi
-
-
-
-install_shortcut
-
 
 menu
-
-
-
-}
-
-
-
-main
