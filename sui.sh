@@ -164,3 +164,266 @@ create_short
 
 echo "安装完成"
 }
+upgrade(){
+
+load
+
+if ! installed;then
+echo "s-ui未安装"
+return
+fi
+
+cd "$PATH_SUI"
+
+if [ -f "$PATH_SUI/sui" ];then
+./sui update
+restart
+echo "升级完成"
+else
+echo "未找到sui"
+fi
+
+}
+
+
+admin(){
+
+load
+
+if ! installed;then
+echo "s-ui未安装"
+return
+fi
+
+read -p "管理员用户名:" u
+read -s -p "管理员密码:" p
+echo
+
+cd "$PATH_SUI"
+
+./sui admin -username "$u" -password "$p"
+
+restart
+
+echo "管理员修改完成"
+
+}
+
+
+change_port(){
+
+load
+
+read -p "新面板端口:" p
+
+cd "$PATH_SUI"
+
+./sui setting -port "$p"
+
+PORT="$p"
+
+save
+
+restart
+
+echo "端口修改完成"
+
+}
+
+
+change_sub(){
+
+load
+
+read -p "新订阅端口:" p
+
+cd "$PATH_SUI"
+
+./sui setting -subPort "$p"
+
+SUBPORT="$p"
+
+save
+
+restart
+
+echo "订阅端口修改完成"
+
+}
+
+
+change_path(){
+
+load
+
+read -p "新路径:" p
+
+cd "$PATH_SUI"
+
+./sui setting -path "$p"
+
+PATH_SUI="$p"
+
+save
+
+echo "路径修改完成"
+
+restart
+
+}
+
+
+status(){
+
+load
+
+echo "================"
+echo "s-ui状态"
+echo "================"
+
+if installed;then
+echo "安装状态: 已安装"
+else
+echo "安装状态: 未安装"
+fi
+
+echo "路径: $PATH_SUI"
+echo "端口: $PORT"
+echo "订阅端口: $SUBPORT"
+
+
+if command -v systemctl >/dev/null;then
+
+systemctl is-active s-ui >/dev/null 2>&1
+
+if [ $? = 0 ];then
+echo "服务: 运行中"
+else
+echo "服务: 未运行"
+fi
+
+elif command -v rc-service >/dev/null;then
+
+rc-service s-ui status
+
+else
+
+echo "服务管理: 未检测"
+
+fi
+
+}
+
+
+repo(){
+
+load
+
+read -p "GitHub用户名 [$REPO_USER]:" x
+[ -n "$x" ]&&REPO_USER="$x"
+
+read -p "仓库名 [$REPO_NAME]:" x
+[ -n "$x" ]&&REPO_NAME="$x"
+
+save
+
+echo "仓库修改完成"
+
+}
+
+
+uninstall(){
+
+load
+
+echo "停止服务"
+
+systemctl stop s-ui 2>/dev/null
+rc-service s-ui stop 2>/dev/null
+
+
+rm -rf "$PATH_SUI"
+
+rm -f /etc/systemd/system/s-ui.service
+
+rm -f /etc/init.d/s-ui
+
+systemctl daemon-reload 2>/dev/null
+
+
+echo "s-ui 已删除"
+
+}
+
+
+remove_script(){
+
+rm -f "$INSTALL"
+rm -f "$SHORT"
+rm -f "$CONF"
+
+hash -r
+
+echo "管理脚本和suio已删除"
+
+exit
+
+}
+
+
+menu(){
+
+load
+
+create_short
+
+clear
+
+echo "======================"
+echo "     s-ui管理器 v3"
+echo "======================"
+
+if installed;then
+echo "状态: 已安装"
+else
+echo "状态: 未安装"
+fi
+
+echo
+
+echo "1. 安装s-ui"
+echo "2. 卸载s-ui"
+echo "3. 升级s-ui"
+echo "4. 修改面板端口"
+echo "5. 修改订阅端口"
+echo "6. 修改管理员账号密码"
+echo "7. 修改安装路径"
+echo "8. 查看状态"
+echo "9. 修改安装仓库"
+echo "10. 删除脚本"
+echo "0. 退出"
+
+echo
+
+read -p "选择:" n
+
+case "$n" in
+
+1) install ;;
+2) uninstall ;;
+3) upgrade ;;
+4) change_port ;;
+5) change_sub ;;
+6) admin ;;
+7) change_path ;;
+8) status ;;
+9) repo ;;
+10) remove_script ;;
+0) exit ;;
+*) menu ;;
+
+esac
+
+}
+
+menu
