@@ -1,15 +1,21 @@
 #!/bin/sh
-VER="1.3"
+VER="1.4"
 BASE="/usr/local/s-ui"
-SUI="$BASE/sui"
-ONE="$BASE/one.sh"
+ONE="/usr/local/one.sh"
 SHORT="/usr/local/bin/suio"
+SUI="$BASE/sui"
 REPO_USER="alireza0"
 REPO_NAME="s-ui"
 PORT="2095"
 SUBPORT="2096"
 
 [ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
+
+cleanup(){
+rm -f /tmp/s-ui.tar.gz
+rm -rf /tmp/s-ui-update*
+hash -r 2>/dev/null
+}
 
 installed(){
 [ -x "$SUI" ]
@@ -48,7 +54,7 @@ esac
 create_suio(){
 cat >/usr/local/bin/suio <<EOF
 #!/bin/sh
-/usr/local/s-ui/one.sh
+/usr/local/one.sh
 EOF
 chmod +x /usr/local/bin/suio
 hash -r 2>/dev/null
@@ -111,31 +117,39 @@ fi
 }
 
 service_restart(){
-if command -v systemctl >/dev/null;then
-systemctl restart s-ui
-fi
-if command -v rc-service >/dev/null;then
-rc-service s-ui restart
-fi
+service_stop
+sleep 1
+service_start
 }
-install_sui(){
+
+cleanup
+download_sui(){
 dep
+case "$(arch)" in
+amd64) FILE="s-ui-linux-amd64.tar.gz";;
+arm64) FILE="s-ui-linux-arm64.tar.gz";;
+esac
+if [ -z "$1" ];then
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
+else
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/download/$1/$FILE"
+fi
+wget -O /tmp/s-ui.tar.gz "$URL"
+}
+
+find_sui(){
+F=$(find "$1" -type f -name sui 2>/dev/null|head -1)
+echo "$F"
+}
+
+install_sui(){
 mkdir -p "$BASE"
 echo "======================"
 echo "s-ui安装 Ver $VER"
 echo "仓库: https://github.com/$REPO_USER/$REPO_NAME"
 echo "======================"
 read -p "版本(空=最新版): " V
-case "$(arch)" in
-amd64) FILE="s-ui-linux-amd64.tar.gz";;
-arm64) FILE="s-ui-linux-arm64.tar.gz";;
-esac
-if [ -z "$V" ];then
-URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
-else
-URL="https://github.com/$REPO_USER/$REPO_NAME/releases/download/$V/$FILE"
-fi
-wget -O /tmp/s-ui.tar.gz "$URL"||{
+download_sui "$V"||{
 echo "下载失败"
 return
 }
@@ -145,12 +159,10 @@ if [ -d "$BASE/s-ui" ];then
 mv "$BASE/s-ui"/* "$BASE"/
 rm -rf "$BASE/s-ui"
 fi
-if [ ! -f "$SUI" ];then
-F=$(find "$BASE" -type f -name sui 2>/dev/null|head -1)
+F=$(find_sui "$BASE")
 [ -n "$F" ]&&mv "$F" "$SUI"
-fi
 chmod +x "$SUI"
-if [ ! -f "$SUI" ];then
+if ! installed;then
 echo "sui不存在"
 return
 fi
@@ -171,16 +183,40 @@ cd "$BASE"
 service_create
 service_enable
 service_start
-cp "$0" "$ONE"
+wget -O "$ONE" https://raw.githubusercontent.com/emmfax/demo/main/sui.sh
 chmod +x "$ONE"
 create_suio
-if [ "$0" != "$ONE" ];then
-rm -f "$0"
-fi
+cleanup
 echo "======================"
 echo "s-ui安装完成"
 echo "快捷命令:suio"
 echo "======================"
+}
+
+upgrade_sui(){
+if ! installed;then
+echo "S-UI未安装"
+return
+fi
+echo "开始升级s-ui"
+service_stop
+mkdir -p /tmp/s-ui-update
+download_sui||{
+echo "下载失败"
+return
+}
+tar zxvf /tmp/s-ui.tar.gz -C /tmp/s-ui-update
+F=$(find_sui /tmp/s-ui-update)
+if [ -z "$F" ];then
+echo "未找到新版sui"
+return
+fi
+cp "$SUI" "$BASE/sui.bak"
+cp "$F" "$SUI"
+chmod +x "$SUI"
+service_start
+cleanup
+echo "s-ui升级完成"
 }
 
 start_sui(){
@@ -207,17 +243,6 @@ return
 fi
 service_stop
 echo "S-UI已停止"
-}
-
-upgrade_sui(){
-if ! installed;then
-echo "S-UI未安装"
-return
-fi
-cd "$BASE"
-./sui update
-service_restart
-echo "升级完成"
 }
 
 change_port(){
@@ -257,6 +282,22 @@ cd "$BASE"
 service_restart
 echo "修改完成"
 }
+change_script(){
+echo "升级管理脚本"
+wget -O "$ONE" https://raw.githubusercontent.com/emmfax/demo/main/sui.sh
+chmod +x "$ONE"
+hash -r 2>/dev/null
+echo "管理脚本升级完成"
+}
+
+change_repo(){
+read -p "GitHub用户名 [$REPO_USER]: " U
+[ -n "$U" ]&&REPO_USER="$U"
+read -p "GitHub仓库 [$REPO_NAME]: " R
+[ -n "$R" ]&&REPO_NAME="$R"
+echo "仓库修改完成"
+}
+
 status_sui(){
 echo "======================"
 echo "s-ui状态 Ver $VER"
@@ -287,21 +328,13 @@ echo "没有日志"
 fi
 }
 
-change_repo(){
-read -p "GitHub用户名 [$REPO_USER]: " U
-[ -n "$U" ]&&REPO_USER="$U"
-read -p "GitHub仓库 [$REPO_NAME]: " R
-[ -n "$R" ]&&REPO_NAME="$R"
-echo "仓库已修改"
-}
-
 uninstall_sui(){
 if ! installed;then
 echo "S-UI未安装"
 return
 fi
 service_stop
-rm -f "$SUI"
+rm -rf "$BASE"
 rm -f /etc/systemd/system/s-ui.service
 rm -f /etc/init.d/s-ui
 systemctl daemon-reload 2>/dev/null
@@ -351,10 +384,10 @@ echo "8. 修改管理员账号密码"
 echo "9. 查看状态"
 echo "10. 修改安装仓库"
 echo "11. 查看日志"
-echo "12. 删除脚本"
+echo "12. 删除管理脚本"
+echo "13. 升级管理脚本"
 echo
 echo "0. 退出"
-echo
 
 read -p "请选择: " N
 
@@ -371,6 +404,7 @@ case "$N" in
 10) change_repo;pause;;
 11) log_sui;pause;;
 12) delete_script;;
+13) change_script;pause;;
 0) exit;;
 *) menu;;
 esac
