@@ -1,17 +1,21 @@
 #!/bin/sh
-# s-ui manager v5
-# fixed /usr/local/s-ui
+# s-ui manager Ver 1.0
+# fixed path /usr/local/s-ui
 
+VER="1.0"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
-SCRIPT="$BASE/one.sh"
+ONE="$BASE/one.sh"
 SHORT="/usr/local/bin/suio"
 CONF="/etc/s-ui-manager.conf"
 
 [ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
 
+SELF=$(readlink -f "$0" 2>/dev/null)
+
 load(){
 [ -f "$CONF" ]&&. "$CONF"
+
 REPO_USER=${REPO_USER:-alireza0}
 REPO_NAME=${REPO_NAME:-s-ui}
 PORT=${PORT:-2095}
@@ -27,17 +31,12 @@ SUBPORT=$SUBPORT
 EOF
 }
 
-create_suio(){
-mkdir -p /usr/local/bin
-cat >/usr/local/bin/suio <<EOF
-#!/bin/sh
-/usr/local/s-ui/one.sh
-EOF
-chmod +x /usr/local/bin/suio
-hash -r 2>/dev/null
+installed(){
+[ -x "$SUI" ]
 }
 
 dep(){
+
 if command -v apk >/dev/null;then
 apk add --no-cache curl wget tar gzip >/dev/null 2>&1
 fi
@@ -46,11 +45,42 @@ if command -v apt >/dev/null;then
 apt update >/dev/null 2>&1
 apt install -y curl wget tar gzip >/dev/null 2>&1
 fi
+
 }
 
-installed(){
-[ -x "$SUI" ]
+arch(){
+
+case "$(uname -m)" in
+
+x86_64|amd64)
+echo "amd64"
+;;
+
+aarch64|arm64)
+echo "arm64"
+;;
+
+*)
+echo "amd64"
+;;
+
+esac
+
 }
+
+
+create_suio(){
+
+cat >/usr/local/bin/suio <<EOF
+#!/bin/sh
+/usr/local/s-ui/one.sh
+EOF
+
+chmod +x /usr/local/bin/suio
+hash -r 2>/dev/null
+
+}
+
 
 service_create(){
 
@@ -76,12 +106,9 @@ else
 
 cat >/etc/init.d/s-ui <<EOF
 #!/sbin/openrc-run
-
 name="s-ui"
 command="/usr/local/s-ui/sui"
 command_background=true
-pidfile="/run/s-ui.pid"
-
 EOF
 
 chmod +x /etc/init.d/s-ui
@@ -89,6 +116,7 @@ chmod +x /etc/init.d/s-ui
 fi
 
 }
+
 
 service_enable(){
 
@@ -102,6 +130,7 @@ fi
 
 }
 
+
 service_start(){
 
 if command -v systemctl >/dev/null;then
@@ -113,6 +142,7 @@ rc-service s-ui start
 fi
 
 }
+
 
 service_stop(){
 
@@ -126,6 +156,7 @@ fi
 
 }
 
+
 service_restart(){
 
 if command -v systemctl >/dev/null;then
@@ -137,8 +168,6 @@ rc-service s-ui restart
 fi
 
 }
-
-
 install_sui(){
 
 load
@@ -146,20 +175,48 @@ dep
 
 mkdir -p "$BASE"
 
-echo "仓库:"
-echo "https://github.com/$REPO_USER/$REPO_NAME"
+echo "======================"
+echo "s-ui安装"
+echo "架构: $(arch)"
+echo "仓库: https://github.com/$REPO_USER/$REPO_NAME"
+echo "======================"
 
-read -p "版本(空=最新版): " VER
+
+read -p "版本(空=最新版): " VER2
 
 
-if [ -z "$VER" ];then
-URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/s-ui-linux-amd64.tar.gz"
+case "$(arch)" in
+
+amd64)
+FILE="s-ui-linux-amd64.tar.gz"
+;;
+
+arm64)
+FILE="s-ui-linux-arm64.tar.gz"
+;;
+
+esac
+
+
+if [ -z "$VER2" ];then
+
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
+
 else
-URL="https://github.com/$REPO_USER/$REPO_NAME/releases/download/$VER/s-ui-linux-amd64.tar.gz"
+
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/download/$VER2/$FILE"
+
 fi
 
 
-wget -O /tmp/s-ui.tar.gz "$URL" || exit 1
+echo "下载:"
+echo "$URL"
+
+
+wget -O /tmp/s-ui.tar.gz "$URL" || {
+echo "下载失败"
+exit 1
+}
 
 
 rm -rf "$BASE"/*
@@ -170,17 +227,25 @@ tar zxvf /tmp/s-ui.tar.gz -C "$BASE"
 
 # 处理release一级目录
 if [ -d "$BASE/s-ui" ];then
+
 mv "$BASE/s-ui"/* "$BASE"/
 rm -rf "$BASE/s-ui"
+
 fi
 
 
 # 自动寻找sui
+
 if [ ! -f "$SUI" ];then
-FOUND=$(find "$BASE" -name sui -type f 2>/dev/null|head -1)
-if [ -n "$FOUND" ];then
-mv "$FOUND" "$SUI"
+
+FIND=$(find "$BASE" -type f -name sui 2>/dev/null|head -1)
+
+if [ -n "$FIND" ];then
+
+mv "$FIND" "$SUI"
+
 fi
+
 fi
 
 
@@ -188,27 +253,35 @@ chmod +x "$SUI"
 
 
 if [ ! -f "$SUI" ];then
-echo "错误:未找到sui程序"
+
+echo "错误:没有找到sui程序"
+
 exit 1
+
 fi
 
 
+
 echo
-echo "开始初始化"
+echo "开始初始化s-ui"
+echo
 
 
-read -p "面板端口 [$PORT]: " x
-[ -n "$x" ]&&PORT="$x"
+read -p "面板端口 [$PORT]: " X
+
+[ -n "$X" ]&&PORT="$X"
 
 
-read -p "订阅端口 [$SUBPORT]: " x
-[ -n "$x" ]&&SUBPORT="$x"
+read -p "订阅端口 [$SUBPORT]: " X
+
+[ -n "$X" ]&&SUBPORT="$X"
 
 
-read -p "管理员用户名:" USER
+read -p "管理员用户名: " ADMIN
 
 
-read -s -p "管理员密码:" PASS
+read -s -p "管理员密码: " PASS
+
 echo
 
 
@@ -221,137 +294,215 @@ cd "$BASE"
 
 ./sui setting -subPort "$SUBPORT"
 
-./sui admin -username "$USER" -password "$PASS"
+./sui admin -username "$ADMIN" -password "$PASS"
+
 
 
 save
 
 
 service_create
+
 service_enable
+
 service_start
 
+
+
+# 保存最终管理脚本
+
+if [ "$SELF" != "$ONE" ]&&[ -f "$SELF" ];then
+
+cp "$SELF" "$ONE"
+
+chmod +x "$ONE"
+
+fi
+
+
+# 创建快捷指令
 
 create_suio
 
 
+
+# 删除外部入口脚本
+
+if [ "$SELF" != "$ONE" ];then
+
+rm -f "$SELF"
+
+fi
+
+
 echo
-echo "================"
+echo "======================"
 echo "s-ui安装完成"
-echo "目录:$BASE"
-echo "端口:$PORT"
-echo "订阅:$SUBPORT"
-echo "快捷命令:suio"
-echo "================"
+echo "版本: Ver $VER"
+echo "目录: $BASE"
+echo "面板端口: $PORT"
+echo "订阅端口: $SUBPORT"
+echo "快捷命令: suio"
+echo "======================"
 
 }
+
+
+
 start_sui(){
+
 if ! installed;then
+
 echo "s-ui未安装"
+
 return
+
 fi
+
+
 service_start
+
 echo "s-ui启动完成"
+
 }
+
+
 
 stop_sui(){
+
 service_stop
+
 echo "s-ui停止完成"
+
 }
+
+
 
 upgrade_sui(){
-load
+
 if ! installed;then
+
 echo "s-ui未安装"
+
 return
+
 fi
+
 
 cd "$BASE"
 
-if [ -f "$SUI" ];then
 ./sui update
+
+
 service_restart
+
+
 echo "升级完成"
-else
-echo "未找到sui"
-fi
+
 }
+
+
 
 change_port(){
-load
 
 if ! installed;then
+
 echo "s-ui未安装"
+
 return
+
 fi
 
-read -p "新的面板端口:" p
+
+read -p "新面板端口:" P
+
 
 cd "$BASE"
 
-./sui setting -port "$p"
+./sui setting -port "$P"
 
-PORT="$p"
+
+PORT="$P"
+
 save
+
 
 service_restart
 
-echo "端口修改完成"
+
+echo "修改完成"
+
 }
+
 
 change_subport(){
 
-load
-
 if ! installed;then
+
 echo "s-ui未安装"
+
 return
+
 fi
 
-read -p "新的订阅端口:" p
+
+read -p "新订阅端口:" P
+
 
 cd "$BASE"
 
-./sui setting -subPort "$p"
+./sui setting -subPort "$P"
 
-SUBPORT="$p"
+
+SUBPORT="$P"
+
 save
+
 
 service_restart
 
-echo "订阅端口修改完成"
+
+echo "修改完成"
+
 }
 
 
 change_admin(){
 
 if ! installed;then
+
 echo "s-ui未安装"
+
 return
+
 fi
 
-read -p "管理员用户名:" u
 
-read -s -p "管理员密码:" p
+read -p "用户名:" U
+
+read -s -p "密码:" P
+
 echo
+
 
 cd "$BASE"
 
-./sui admin -username "$u" -password "$p"
+./sui admin -username "$U" -password "$P"
+
 
 service_restart
 
-echo "管理员修改完成"
+
+echo "修改完成"
+
 }
-
-
 status_sui(){
 
 load
 
-echo "================"
-echo "s-ui状态"
-echo "================"
+echo "======================"
+echo "s-ui状态 Ver $VER"
+echo "======================"
 
 if installed;then
 echo "安装状态: 已安装"
@@ -359,10 +510,11 @@ else
 echo "安装状态: 未安装"
 fi
 
-echo "程序路径:$SUI"
-echo "目录:$BASE"
-echo "面板端口:$PORT"
-echo "订阅端口:$SUBPORT"
+echo
+echo "程序: $SUI"
+echo "目录: $BASE"
+echo "面板端口: $PORT"
+echo "订阅端口: $SUBPORT"
 
 echo
 
@@ -376,7 +528,7 @@ rc-service s-ui status
 
 else
 
-echo "未检测到服务管理器"
+echo "未检测服务管理器"
 
 fi
 
@@ -395,84 +547,107 @@ tail -50 /var/log/s-ui.log
 
 else
 
-echo "没有找到日志"
+echo "没有日志"
 
 fi
 
 }
+
 
 
 change_repo(){
 
 load
 
-read -p "GitHub用户名 [$REPO_USER]:" x
+read -p "GitHub用户名 [$REPO_USER]: " X
 
-[ -n "$x" ]&&REPO_USER="$x"
+[ -n "$X" ]&&REPO_USER="$X"
 
 
-read -p "GitHub仓库 [$REPO_NAME]:" x
+read -p "GitHub仓库 [$REPO_NAME]: " X
 
-[ -n "$x" ]&&REPO_NAME="$x"
+[ -n "$X" ]&&REPO_NAME="$X"
 
 
 save
+
 
 echo "仓库修改完成"
 
 }
 
 
+
 uninstall_sui(){
+
+echo "停止s-ui"
 
 service_stop
 
-rm -rf "$BASE"
+
+rm -f "$SUI"
+
 
 rm -f /etc/systemd/system/s-ui.service
 
 rm -f /etc/init.d/s-ui
 
+
 systemctl daemon-reload 2>/dev/null
 
-echo "s-ui已卸载"
+
+echo
+echo "s-ui程序已卸载"
+echo "管理脚本仍保留"
+echo
 
 }
 
 
+
 delete_script(){
+
+echo "删除管理脚本"
 
 rm -f "$SHORT"
 
-rm -f "$CONF"
+rm -f "$ONE"
 
-echo "suio和配置已删除"
+
+echo "suio和one.sh已删除"
 
 exit
 
 }
 
 
+
 menu(){
 
 load
 
-create_suio
 
 clear
 
+
 echo "======================"
-echo "       s-ui管理器 v5"
+echo "      s-ui管理器"
+echo "        Ver $VER"
 echo "======================"
+
 
 if installed;then
+
 echo "状态: 已安装"
+
 else
+
 echo "状态: 未安装"
+
 fi
 
-echo
 
+echo
 echo "1. 启动 s-ui"
 echo "2. 停止 s-ui"
 echo "3. 安装 s-ui"
@@ -484,34 +659,75 @@ echo "8. 修改管理员账号密码"
 echo "9. 查看状态"
 echo "10. 修改安装仓库"
 echo "11. 查看日志"
-echo "12. 删除脚本"
-
+echo "12. 删除管理脚本"
 echo
 echo "0. 退出"
-
 echo
 
-read -p "选择:" n
+
+read -p "请选择: " N
 
 
-case "$n" in
+case "$N" in
 
-1) start_sui ;;
-2) stop_sui ;;
-3) install_sui ;;
-4) uninstall_sui ;;
-5) upgrade_sui ;;
-6) change_port ;;
-7) change_subport ;;
-8) change_admin ;;
-9) status_sui ;;
-10) change_repo ;;
-11) log_sui ;;
-12) delete_script ;;
-0) exit ;;
-*) menu ;;
+1)
+start_sui
+;;
+
+2)
+stop_sui
+;;
+
+3)
+install_sui
+;;
+
+4)
+uninstall_sui
+;;
+
+5)
+upgrade_sui
+;;
+
+6)
+change_port
+;;
+
+7)
+change_subport
+;;
+
+8)
+change_admin
+;;
+
+9)
+status_sui
+;;
+
+10)
+change_repo
+;;
+
+11)
+log_sui
+;;
+
+12)
+delete_script
+;;
+
+0)
+exit
+;;
+
+*)
+menu
+;;
 
 esac
+
 
 }
 
