@@ -330,3 +330,136 @@ cd "$BASE"
 service_restart
 echo "修改完成"
 }
+status_sui(){
+echo "======================"
+echo "s-ui状态 Ver $VER"
+echo "======================"
+if ! installed;then
+echo "安装状态: 未安装"
+echo "运行状态: 未运行"
+return
+fi
+echo "安装状态: 已安装"
+if running;then
+echo "运行状态: 运行中"
+else
+echo "运行状态: 未运行"
+fi
+echo
+echo "程序路径: $SUI"
+echo "安装目录: $BASE"
+}
+
+log_sui(){
+if command -v journalctl >/dev/null;then
+journalctl -u s-ui -n 50 --no-pager
+elif command -v rc-service >/dev/null;then
+rc-service s-ui status
+else
+echo "没有日志"
+fi
+}
+
+change_repo(){
+read -p "GitHub用户名 [$REPO_USER]: " U
+[ -n "$U" ]&&REPO_USER="$U"
+read -p "GitHub仓库 [$REPO_NAME]: " R
+[ -n "$R" ]&&REPO_NAME="$R"
+echo "仓库修改完成"
+}
+
+update_script(){
+echo "升级管理脚本"
+wget -O "$ONE" https://raw.githubusercontent.com/emmfax/demo/main/sui.sh
+chmod +x "$ONE"
+hash -r 2>/dev/null
+echo "管理脚本升级完成"
+}
+
+uninstall_sui(){
+if ! installed;then
+echo "S-UI未安装"
+return
+fi
+service_stop
+rm -rf "$BASE"
+rm -f /etc/systemd/system/s-ui.service
+rm -f /etc/init.d/s-ui
+systemctl daemon-reload 2>/dev/null
+echo "S-UI卸载完成"
+}
+
+delete_script(){
+rm -f "$SHORT"
+rm -f "$ONE"
+echo "脚本删除完成"
+exit
+}
+
+pause(){
+echo
+read -p "按回车返回菜单"
+}
+
+menu(){
+clear
+echo "======================"
+echo "      s-ui管理器"
+echo "        Ver $VER"
+echo "======================"
+
+if installed;then
+echo "安装状态: 已安装"
+else
+echo "安装状态: 未安装"
+fi
+
+if running;then
+echo "运行状态: 运行中"
+else
+echo "运行状态: 未运行"
+fi
+
+echo
+echo "1. 启动 s-ui"
+echo "2. 停止 s-ui"
+echo "3. 安装 s-ui"
+echo "4. 卸载 s-ui"
+echo "5. 升级 s-ui"
+echo "6. 修改面板端口"
+echo "7. 修改订阅端口"
+echo "8. 面板路径设置"
+echo "9. 查看状态"
+echo "10. 查看日志"
+echo "11. 修改管理员账号密码"
+echo "12. 修改安装仓库"
+echo "13. 升级管理脚本"
+echo "14. 删除管理脚本"
+echo
+echo "0. 退出"
+
+read -p "请选择: " N
+
+case "$N" in
+1) start_sui;pause;;
+2) stop_sui;pause;;
+3) install_sui;pause;;
+4) uninstall_sui;pause;;
+5) upgrade_sui;pause;;
+6) change_port;pause;;
+7) change_subport;pause;;
+8) change_path;pause;;
+9) status_sui;pause;;
+10) log_sui;pause;;
+11) change_admin;pause;;
+12) change_repo;pause;;
+13) update_script;pause;;
+14) delete_script;;
+0) exit;;
+*) menu;;
+esac
+
+menu
+}
+
+menu
