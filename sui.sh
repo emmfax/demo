@@ -1,33 +1,15 @@
 #!/bin/sh
-# s-ui manager Ver 1.2
-
-VER="1.2"
+VER="1.3"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 ONE="$BASE/one.sh"
 SHORT="/usr/local/bin/suio"
-CONF="/etc/s-ui-manager.conf"
+REPO_USER="alireza0"
+REPO_NAME="s-ui"
+PORT="2095"
+SUBPORT="2096"
 
 [ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
-
-SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
-
-load(){
-[ -f "$CONF" ]&&. "$CONF"
-REPO_USER=${REPO_USER:-alireza0}
-REPO_NAME=${REPO_NAME:-s-ui}
-PORT=${PORT:-2095}
-SUBPORT=${SUBPORT:-2096}
-}
-
-save(){
-cat >"$CONF"<<EOF
-REPO_USER=$REPO_USER
-REPO_NAME=$REPO_NAME
-PORT=$PORT
-SUBPORT=$SUBPORT
-EOF
-}
 
 installed(){
 [ -x "$SUI" ]
@@ -47,11 +29,11 @@ return 1
 
 dep(){
 if command -v apk >/dev/null;then
-apk add --no-cache curl wget tar gzip >/dev/null 2>&1
+apk add --no-cache wget curl tar gzip >/dev/null 2>&1
 fi
 if command -v apt >/dev/null;then
 apt update >/dev/null 2>&1
-apt install -y curl wget tar gzip >/dev/null 2>&1
+apt install -y wget curl tar gzip >/dev/null 2>&1
 fi
 }
 
@@ -137,97 +119,66 @@ rc-service s-ui restart
 fi
 }
 install_sui(){
-load
 dep
 mkdir -p "$BASE"
-
 echo "======================"
 echo "s-ui安装 Ver $VER"
-echo "架构: $(arch)"
 echo "仓库: https://github.com/$REPO_USER/$REPO_NAME"
 echo "======================"
-
 read -p "版本(空=最新版): " V
-
 case "$(arch)" in
 amd64) FILE="s-ui-linux-amd64.tar.gz";;
 arm64) FILE="s-ui-linux-arm64.tar.gz";;
 esac
-
 if [ -z "$V" ];then
 URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
 else
 URL="https://github.com/$REPO_USER/$REPO_NAME/releases/download/$V/$FILE"
 fi
-
 wget -O /tmp/s-ui.tar.gz "$URL"||{
 echo "下载失败"
 return
 }
-
 rm -rf "$BASE"/*
-
 tar zxvf /tmp/s-ui.tar.gz -C "$BASE"
-
 if [ -d "$BASE/s-ui" ];then
 mv "$BASE/s-ui"/* "$BASE"/
 rm -rf "$BASE/s-ui"
 fi
-
 if [ ! -f "$SUI" ];then
 F=$(find "$BASE" -type f -name sui 2>/dev/null|head -1)
 [ -n "$F" ]&&mv "$F" "$SUI"
 fi
-
 chmod +x "$SUI"
-
 if [ ! -f "$SUI" ];then
-echo "未找到sui程序"
+echo "sui不存在"
 return
 fi
-
 echo
 echo "开始初始化s-ui"
-
-PORT=2095
-SUBPORT=2096
-
-read -p "面板端口 [$PORT]: " X
+read -p "面板端口 [2095]: " X
 [ -n "$X" ]&&PORT="$X"
-
-read -p "订阅端口 [$SUBPORT]: " X
+read -p "订阅端口 [2096]: " X
 [ -n "$X" ]&&SUBPORT="$X"
-
 read -p "管理员用户名: " USER
 read -s -p "管理员密码: " PASS
 echo
-
 cd "$BASE"
-
 ./sui setting -path "$BASE"
 ./sui setting -port "$PORT"
 ./sui setting -subPort "$SUBPORT"
 ./sui admin -username "$USER" -password "$PASS"
-
-save
-
 service_create
 service_enable
 service_start
-
-cp "$SELF" "$ONE"
+cp "$0" "$ONE"
 chmod +x "$ONE"
-
 create_suio
-
-if [ "$SELF" != "$ONE" ];then
-rm -f "$SELF"
+if [ "$0" != "$ONE" ];then
+rm -f "$0"
 fi
-
-echo
 echo "======================"
 echo "s-ui安装完成"
-echo "目录:$BASE"
 echo "快捷命令:suio"
 echo "======================"
 }
@@ -277,8 +228,6 @@ fi
 read -p "新的面板端口:" P
 cd "$BASE"
 ./sui setting -port "$P"
-PORT="$P"
-save
 service_restart
 echo "修改完成"
 }
@@ -291,8 +240,6 @@ fi
 read -p "新的订阅端口:" P
 cd "$BASE"
 ./sui setting -subPort "$P"
-SUBPORT="$P"
-save
 service_restart
 echo "修改完成"
 }
@@ -311,28 +258,23 @@ service_restart
 echo "修改完成"
 }
 status_sui(){
-load
 echo "======================"
 echo "s-ui状态 Ver $VER"
 echo "======================"
-
-if installed;then
-echo "安装状态: 已安装"
-else
+if ! installed;then
 echo "安装状态: 未安装"
+echo "运行状态: 未运行"
+return
 fi
-
+echo "安装状态: 已安装"
 if running;then
 echo "运行状态: 运行中"
 else
 echo "运行状态: 未运行"
 fi
-
 echo
 echo "程序路径: $SUI"
 echo "安装目录: $BASE"
-echo "面板端口: $PORT"
-echo "订阅端口: $SUBPORT"
 }
 
 log_sui(){
@@ -346,13 +288,11 @@ fi
 }
 
 change_repo(){
-load
-read -p "GitHub用户名 [$REPO_USER]: " X
-[ -n "$X" ]&&REPO_USER="$X"
-read -p "GitHub仓库 [$REPO_NAME]: " X
-[ -n "$X" ]&&REPO_NAME="$X"
-save
-echo "仓库修改完成"
+read -p "GitHub用户名 [$REPO_USER]: " U
+[ -n "$U" ]&&REPO_USER="$U"
+read -p "GitHub仓库 [$REPO_NAME]: " R
+[ -n "$R" ]&&REPO_NAME="$R"
+echo "仓库已修改"
 }
 
 uninstall_sui(){
@@ -360,15 +300,11 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
-
 service_stop
-
 rm -f "$SUI"
 rm -f /etc/systemd/system/s-ui.service
 rm -f /etc/init.d/s-ui
-
 systemctl daemon-reload 2>/dev/null
-
 echo "S-UI卸载完成"
 }
 
@@ -385,9 +321,7 @@ read -p "按回车返回菜单"
 }
 
 menu(){
-load
 clear
-
 echo "======================"
 echo "      s-ui管理器"
 echo "        Ver $VER"
@@ -417,7 +351,7 @@ echo "8. 修改管理员账号密码"
 echo "9. 查看状态"
 echo "10. 修改安装仓库"
 echo "11. 查看日志"
-echo "12. 删除管理脚本"
+echo "12. 删除脚本"
 echo
 echo "0. 退出"
 echo
@@ -425,71 +359,23 @@ echo
 read -p "请选择: " N
 
 case "$N" in
-1)
-start_sui
-pause
-menu
-;;
-2)
-stop_sui
-pause
-menu
-;;
-3)
-install_sui
-pause
-menu
-;;
-4)
-uninstall_sui
-pause
-menu
-;;
-5)
-upgrade_sui
-pause
-menu
-;;
-6)
-change_port
-pause
-menu
-;;
-7)
-change_subport
-pause
-menu
-;;
-8)
-change_admin
-pause
-menu
-;;
-9)
-status_sui
-pause
-menu
-;;
-10)
-change_repo
-pause
-menu
-;;
-11)
-log_sui
-pause
-menu
-;;
-12)
-delete_script
-;;
-0)
-exit
-;;
-*)
-menu
-;;
+1) start_sui;pause;;
+2) stop_sui;pause;;
+3) install_sui;pause;;
+4) uninstall_sui;pause;;
+5) upgrade_sui;pause;;
+6) change_port;pause;;
+7) change_subport;pause;;
+8) change_admin;pause;;
+9) status_sui;pause;;
+10) change_repo;pause;;
+11) log_sui;pause;;
+12) delete_script;;
+0) exit;;
+*) menu;;
 esac
+
+menu
 }
 
 menu
