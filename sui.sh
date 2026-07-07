@@ -11,7 +11,7 @@ REPO_NAME="s-ui"
 
 cleanup(){
 rm -f /tmp/s-ui.tar.gz
-rm -rf /tmp/s-ui-update*
+rm -rf /tmp/s-ui-update
 hash -r 2>/dev/null
 }
 
@@ -19,18 +19,13 @@ installed(){
 [ -x "$SUI" ]
 }
 
+process_run(){
+pidof sui >/dev/null 2>&1
+}
+
 running(){
-if [ ! -x "$SUI" ];then
-return 1
-fi
-if command -v pidof >/dev/null;then
-pidof sui >/dev/null 2>&1&&return 0
-fi
-if command -v systemctl >/dev/null;then
-systemctl is-active --quiet s-ui&&return 0
-fi
-if command -v rc-service >/dev/null;then
-rc-service s-ui status >/dev/null 2>&1&&return 0
+if process_run;then
+return 0
 fi
 return 1
 }
@@ -107,13 +102,13 @@ return
 fi
 if command -v rc-service >/dev/null;then
 rc-service s-ui start
-return
 fi
 }
 
 service_stop(){
 if command -v systemctl >/dev/null;then
 systemctl stop s-ui
+return
 fi
 if command -v rc-service >/dev/null;then
 rc-service s-ui stop
@@ -146,70 +141,90 @@ find "$1" -type f -name sui 2>/dev/null|head -1
 }
 
 install_sui(){
-mkdir -p "$BASE"
 echo "======================"
 echo "s-ui安装 Ver $VER"
 echo "======================"
+
+if [ -d "$BASE" ];then
+read -p "检测到s-ui目录,是否覆盖安装? [y/N]: " C
+[ "$C" != "y" ]&&return
+fi
+
 read -p "版本(空=最新版): " V
+
 download_sui "$V"||{
 echo "下载失败"
 return
 }
+
+mkdir -p "$BASE"
 rm -rf "$BASE"/*
+
 tar zxvf /tmp/s-ui.tar.gz -C "$BASE"
+
 if [ -d "$BASE/s-ui" ];then
 mv "$BASE/s-ui"/* "$BASE"/
 rm -rf "$BASE/s-ui"
 fi
+
 F=$(find_sui "$BASE")
+
 [ -n "$F" ]&&mv "$F" "$SUI"
+
 chmod +x "$SUI"
+
 if ! installed;then
-echo "sui不存在"
+echo "sui文件不存在"
 return
 fi
+
 echo
 echo "开始初始化s-ui"
-while :;do
-read -p "面板端口: " PORT
-[ -n "$PORT" ]&&break
-done
-while :;do
-read -p "订阅端口: " SUBPORT
-[ -n "$SUBPORT" ]&&break
-done
-while :;do
-read -p "面板路径 [app]: " PATH
-[ -n "$PATH" ]&&break
-done
+
+read -p "面板端口 [2095]: " PORT
+[ -z "$PORT" ]&&PORT="2095"
+
+read -p "订阅端口 [2096]: " SUB
+[ -z "$SUB" ]&&SUB="2096"
+
+read -p "面板路径 [app]: " PATHSET
+[ -z "$PATHSET" ]&&PATHSET="app"
+
 while :;do
 read -p "管理员用户名: " USER
 [ -n "$USER" ]&&break
+echo "用户名不能为空"
 done
+
 while :;do
 read -s -p "管理员密码: " PASS
 echo
 [ -n "$PASS" ]&&break
+echo "密码不能为空"
 done
+
 cd "$BASE"
+
 ./sui setting -port "$PORT"
-./sui setting -subPort "$SUBPORT"
-./sui setting -path "$PATH"
+./sui setting -subPort "$SUB"
+./sui setting -path "$PATHSET"
 ./sui admin -username "$USER" -password "$PASS"
+
 service_create
 service_enable
 service_start
+
 wget -O "$ONE" https://raw.githubusercontent.com/emmfax/demo/main/sui.sh
 chmod +x "$ONE"
+
 create_suio
+
 cleanup
-if running;then
-echo "S-UI运行中"
-else
-echo "S-UI启动失败"
-fi
+
+echo
 echo "======================"
 echo "s-ui安装完成"
+echo "目录:$BASE"
 echo "快捷命令:suio"
 echo "======================"
 }
@@ -219,29 +234,36 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
+
 echo "开始升级s-ui"
+
 service_stop
+
 mkdir -p /tmp/s-ui-update
+
 download_sui||{
 echo "下载失败"
 return
 }
+
 tar zxvf /tmp/s-ui.tar.gz -C /tmp/s-ui-update
+
 F=$(find_sui /tmp/s-ui-update)
+
 if [ -z "$F" ];then
-echo "未找到sui"
+echo "未找到新版sui"
 return
 fi
+
 cp "$SUI" "$BASE/sui.bak"
 cp "$F" "$SUI"
 chmod +x "$SUI"
+
 service_start
+
 cleanup
-if running;then
-echo "升级完成"
-else
-echo "升级失败"
-fi
+
+echo "s-ui升级完成"
 }
 
 start_sui(){
@@ -249,11 +271,16 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
+
 if running;then
 echo "S-UI正在运行"
 return
 fi
+
 service_start
+
+sleep 2
+
 if running;then
 echo "S-UI运行中"
 else
@@ -266,11 +293,16 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
+
 if ! running;then
 echo "S-UI未运行"
 return
 fi
+
 service_stop
+
+sleep 1
+
 if running;then
 echo "S-UI停止失败"
 else
@@ -283,11 +315,14 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
+
 read -p "新的面板端口: " P
-[ -z "$P" ]&&return
+
 cd "$BASE"
 ./sui setting -port "$P"
+
 service_restart
+
 echo "修改完成"
 }
 
@@ -296,11 +331,14 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
+
 read -p "新的订阅端口: " P
-[ -z "$P" ]&&return
+
 cd "$BASE"
 ./sui setting -subPort "$P"
+
 service_restart
+
 echo "修改完成"
 }
 
@@ -309,11 +347,15 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
+
 read -p "新的面板路径 [app]: " P
 [ -z "$P" ]&&P="app"
+
 cd "$BASE"
 ./sui setting -path "$P"
+
 service_restart
+
 echo "修改完成"
 }
 
@@ -322,39 +364,52 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
+
 read -p "管理员用户名: " U
 read -s -p "管理员密码: " P
 echo
+
 cd "$BASE"
 ./sui admin -username "$U" -password "$P"
+
 service_restart
+
 echo "修改完成"
 }
 status_sui(){
 echo "======================"
 echo "s-ui状态 Ver $VER"
 echo "======================"
+
 if ! installed;then
 echo "安装状态: 未安装"
 echo "运行状态: 未运行"
 return
 fi
+
 echo "安装状态: 已安装"
+
 if running;then
 echo "运行状态: 运行中"
 else
 echo "运行状态: 未运行"
 fi
+
 echo
-echo "程序路径: $SUI"
-echo "安装目录: $BASE"
+echo "程序路径:$SUI"
+echo "安装目录:$BASE"
 }
 
 log_sui(){
+if ! installed;then
+echo "S-UI未安装"
+return
+fi
+
 if command -v journalctl >/dev/null;then
 journalctl -u s-ui -n 50 --no-pager
-elif command -v rc-service >/dev/null;then
-rc-service s-ui status
+elif [ -f /var/log/s-ui.log ];then
+tail -50 /var/log/s-ui.log
 else
 echo "没有日志"
 fi
@@ -363,17 +418,25 @@ fi
 change_repo(){
 read -p "GitHub用户名 [$REPO_USER]: " U
 [ -n "$U" ]&&REPO_USER="$U"
+
 read -p "GitHub仓库 [$REPO_NAME]: " R
 [ -n "$R" ]&&REPO_NAME="$R"
+
 echo "仓库修改完成"
 }
 
 update_script(){
 echo "升级管理脚本"
+
 wget -O "$ONE" https://raw.githubusercontent.com/emmfax/demo/main/sui.sh
+
+if [ -f "$ONE" ];then
 chmod +x "$ONE"
 hash -r 2>/dev/null
 echo "管理脚本升级完成"
+else
+echo "升级失败"
+fi
 }
 
 uninstall_sui(){
@@ -381,18 +444,23 @@ if ! installed;then
 echo "S-UI未安装"
 return
 fi
+
 service_stop
+
 rm -rf "$BASE"
+
 rm -f /etc/systemd/system/s-ui.service
 rm -f /etc/init.d/s-ui
+
 systemctl daemon-reload 2>/dev/null
+
 echo "S-UI卸载完成"
 }
 
 delete_script(){
-rm -f "$SHORT"
 rm -f "$ONE"
-echo "脚本删除完成"
+rm -f "$SHORT"
+echo "管理脚本删除完成"
 exit
 }
 
@@ -403,6 +471,7 @@ read -p "按回车返回菜单"
 
 menu(){
 clear
+
 echo "======================"
 echo "      s-ui管理器"
 echo "        Ver $VER"
@@ -441,24 +510,25 @@ echo "0. 退出"
 read -p "请选择: " N
 
 case "$N" in
-1) start_sui;pause;;
-2) stop_sui;pause;;
-3) install_sui;pause;;
-4) uninstall_sui;pause;;
-5) upgrade_sui;pause;;
-6) change_port;pause;;
-7) change_subport;pause;;
-8) change_path;pause;;
-9) status_sui;pause;;
-10) log_sui;pause;;
-11) change_admin;pause;;
-12) change_repo;pause;;
-13) update_script;pause;;
+1) start_sui;;
+2) stop_sui;;
+3) install_sui;;
+4) uninstall_sui;;
+5) upgrade_sui;;
+6) change_port;;
+7) change_subport;;
+8) change_path;;
+9) status_sui;;
+10) log_sui;;
+11) change_admin;;
+12) change_repo;;
+13) update_script;;
 14) delete_script;;
 0) exit;;
-*) menu;;
+*) echo "错误选择";;
 esac
 
+pause
 menu
 }
 
