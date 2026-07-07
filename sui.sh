@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="1.6"
+VER="1.7"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 ONE="/usr/local/one.sh"
@@ -8,17 +8,13 @@ REPO_USER="alireza0"
 REPO_NAME="s-ui"
 
 [ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
-
-SELF=$(readlink -f "$0" 2>/dev/null)
+[ -t 0 ]||exec </dev/tty
 
 cleanup(){
-rm -f /tmp/s-ui.tar.gz
+rm -f /tmp/sui.sh /tmp/s-ui.tar.gz
 rm -rf /tmp/s-ui-update
+rm -f /root/sui.sh ./sui.sh
 hash -r 2>/dev/null
-}
-
-cleanup_self(){
-[ -n "$SELF" ]&&[ "$SELF" != "$ONE" ]&&[ -f "$SELF" ]&&rm -f "$SELF"
 }
 
 installed(){
@@ -113,7 +109,6 @@ EOF
 chmod +x "$SHORT"
 }
 
-cleanup_self
 cleanup
 download_sui(){
 dep
@@ -121,8 +116,7 @@ case "$(arch)" in
 amd64) FILE="s-ui-linux-amd64.tar.gz";;
 arm64) FILE="s-ui-linux-arm64.tar.gz";;
 esac
-URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
-wget -qO /tmp/s-ui.tar.gz "$URL"
+wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
 }
 
 find_sui(){
@@ -171,7 +165,6 @@ rm -rf "$BASE/s-ui"
 fi
 
 F=$(find_sui "$BASE")
-
 [ -n "$F" ]&&mv "$F" "$SUI"
 
 chmod +x "$SUI"
@@ -205,10 +198,8 @@ fi
 cleanup
 
 echo
-echo "======================"
 echo "s-ui安装完成"
 echo "快捷命令:suio"
-echo "======================"
 }
 
 start_sui(){
@@ -291,7 +282,6 @@ read -p "新的面板路径 [app]: " P
 cd "$BASE"
 ./sui setting -path "$P"
 service_restart
-
 echo "修改完成"
 }
 
@@ -308,7 +298,6 @@ echo
 cd "$BASE"
 ./sui admin -username "$U" -password "$P"
 service_restart
-
 echo "修改完成"
 }
 status_sui(){
@@ -380,7 +369,6 @@ exit
 }
 
 pause(){
-echo
 read -p "按回车返回菜单"
 }
 
