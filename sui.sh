@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="0.15"
+VER="0.16"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 SERVICE="s-ui"
@@ -20,6 +20,13 @@ is_openrc(){
 command -v rc-service >/dev/null
 }
 
+confirm(){
+case "$(echo "$1"|tr 'A-Z' 'a-z')" in
+y|yes)return 0;;
+*)return 1;;
+esac
+}
+
 cleanup(){
 rm -f /tmp/sui.sh /tmp/s-ui.tar.gz
 rm -rf /tmp/s-ui-update
@@ -38,7 +45,7 @@ pgrep -f "$SUI" >/dev/null 2>&1
 
 check_port(){
 case "$1" in
-''|*[!0-9]*) return 1;;
+''|*[!0-9]*)return 1;;
 esac
 [ "$1" -ge 1 ]&&[ "$1" -le 65535 ]
 }
@@ -46,8 +53,8 @@ esac
 check_user(){
 [ -n "$1" ]||return 1
 case "$1" in
-*[!a-zA-Z0-9_-]*) return 1;;
-*) return 0;;
+*[!a-zA-Z0-9_-]*)return 1;;
+*)return 0;;
 esac
 }
 
@@ -66,9 +73,9 @@ fi
 
 arch(){
 case "$(uname -m)" in
-x86_64|amd64) echo amd64;;
-aarch64|arm64) echo arm64;;
-*) echo amd64;;
+x86_64|amd64)echo amd64;;
+aarch64|arm64)echo arm64;;
+*)echo amd64;;
 esac
 }
 
@@ -123,7 +130,6 @@ service_stop(){
 if is_systemd;then
 systemctl stop $SERVICE >/dev/null 2>&1
 elif is_openrc;then
-chmod +x /etc/init.d/$SERVICE 2>/dev/null
 rc-service $SERVICE stop >/dev/null 2>&1
 fi
 }
@@ -147,8 +153,8 @@ cleanup
 download_sui(){
 dep
 case "$(arch)" in
-amd64) FILE="s-ui-linux-amd64.tar.gz";;
-arm64) FILE="s-ui-linux-arm64.tar.gz";;
+amd64)FILE="s-ui-linux-amd64.tar.gz";;
+arm64)FILE="s-ui-linux-arm64.tar.gz";;
 esac
 wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"&&[ -s /tmp/s-ui.tar.gz ]
 }
@@ -177,11 +183,11 @@ for i in 1 2 3 4 5
 do
 printf "\r安装进度 ["
 case "$i" in
-1) printf "■    ";;
-2) printf "■■   ";;
-3) printf "■■■  ";;
-4) printf "■■■■ ";;
-5) printf "■■■■■";;
+1)printf "■    ";;
+2)printf "■■   ";;
+3)printf "■■■  ";;
+4)printf "■■■■ ";;
+5)printf "■■■■■";;
 esac
 printf "]"
 sleep 1
@@ -192,10 +198,7 @@ echo
 input_user(){
 while :;do
 read -p "管理员用户名: " USER
-if [ -z "$USER" ];then
-echo "用户名不能为空"
-continue
-fi
+[ -z "$USER" ]&&echo "用户名不能为空，请重新输入"&&continue
 check_user "$USER"&&break
 echo "用户名只能包含英文、数字、_、-"
 done
@@ -205,14 +208,14 @@ input_pass(){
 while :;do
 read -p "管理员密码: " PASS
 [ -n "$PASS" ]&&break
-echo "密码不能为空"
+echo "密码不能为空，请重新输入"
 done
 }
 
 install_sui(){
 if installed;then
-read -p "S-UI已安装，继续覆盖? [y/N]: " X
-[ "$X" = "y" ]||[ "$X" = "Y" ]||return
+read -p "S-UI已安装，继续覆盖? [Y/N]: " X
+confirm "$X"||return
 fi
 
 echo "======================"
@@ -223,14 +226,14 @@ while :;do
 read -p "面板端口 [2095]: " PORT
 [ -z "$PORT" ]&&PORT=2095
 check_port "$PORT"&&break
-echo "端口错误"
+echo "端口错误，请重新输入"
 done
 
 while :;do
 read -p "订阅端口 [2096]: " SUB
 [ -z "$SUB" ]&&SUB=2096
 check_port "$SUB"&&break
-echo "端口错误"
+echo "端口错误，请重新输入"
 done
 
 read -p "面板路径 [app]: " PATHSET
@@ -253,12 +256,12 @@ fi
 rm -rf "$BASE"
 mkdir -p "$BASE"
 
-if ! tar zxf /tmp/s-ui.tar.gz -C "$BASE";then
+tar zxf /tmp/s-ui.tar.gz -C "$BASE"||{
 rm -rf "$BASE"
 echo "解压失败"
 cleanup
 return
-fi
+}
 
 if [ -d "$BASE/s-ui" ];then
 mv "$BASE/s-ui"/* "$BASE"/
@@ -267,12 +270,12 @@ fi
 
 F=$(find_sui "$BASE")
 
-if [ -z "$F" ];then
+[ -n "$F" ]||{
 rm -rf "$BASE"
 echo "安装文件错误"
 cleanup
 return
-fi
+}
 
 mv "$F" "$SUI"
 chmod +x "$SUI"
@@ -312,10 +315,7 @@ echo "S-UI未安装"
 return
 fi
 
-if running;then
-echo "S-UI已经运行"
-return
-fi
+running&&echo "S-UI已经运行"&&return
 
 service_start
 sleep 2
@@ -329,10 +329,10 @@ echo "S-UI未安装"
 return
 fi
 
-if ! running;then
+running||{
 echo "S-UI未运行"
 return
-fi
+}
 
 service_stop
 sleep 1
@@ -423,8 +423,7 @@ echo "======================"
 if is_systemd;then
 systemctl status $SERVICE --no-pager
 elif is_openrc;then
-chmod +x /etc/init.d/$SERVICE 2>/dev/null
-rc-service $SERVICE status
+[ -f /etc/init.d/$SERVICE ]&&rc-service $SERVICE status||echo "服务未注册"
 else
 echo "无法检测服务状态"
 fi
@@ -446,6 +445,12 @@ echo "S-UI未安装"
 return
 fi
 
+read -p "确认卸载S-UI? [Y/N]: " X
+confirm "$X"||{
+echo "取消卸载"
+return
+}
+
 echo "卸载S-UI"
 
 if is_systemd;then
@@ -453,7 +458,7 @@ systemctl stop $SERVICE >/dev/null 2>&1
 systemctl disable $SERVICE >/dev/null 2>&1
 else
 command -v rc-update >/dev/null&&rc-update del $SERVICE default >/dev/null 2>&1
-is_openrc&&chmod +x /etc/init.d/$SERVICE 2>/dev/null&&rc-service $SERVICE stop >/dev/null 2>&1
+is_openrc&&rc-service $SERVICE stop >/dev/null 2>&1
 fi
 
 rm -rf "$BASE"
@@ -467,20 +472,18 @@ echo "S-UI卸载完成"
 }
 
 delete_script(){
-echo "确认删除管理脚本? [y/N]"
-read -r X
+read -p "确认删除管理脚本? [Y/N]: " X
 
-case "$X" in
-y|Y)
+confirm "$X"||{
+echo "取消删除"
+return
+}
+
 rm -f "$ONE" "$SHORT"
 hash -r 2>/dev/null
+
 echo "管理脚本删除完成"
 exit
-;;
-*)
-echo "取消删除"
-;;
-esac
 }
 
 pause(){
@@ -529,21 +532,21 @@ echo "0. 退出"
 read -p "请选择: " N
 
 case "$N" in
-1) start_sui;;
-2) stop_sui;;
-3) install_sui;;
-4) uninstall_sui;;
-5) status_sui;;
-6) change_port;;
-7) change_sub;;
-8) change_path;;
-9) change_sub_path;;
-10) change_admin;;
-11) change_repo;;
-12) install_script;;
-13) delete_script;;
-0) exit;;
-*) echo "错误选择";;
+1)start_sui;;
+2)stop_sui;;
+3)install_sui;;
+4)uninstall_sui;;
+5)status_sui;;
+6)change_port;;
+7)change_sub;;
+8)change_path;;
+9)change_sub_path;;
+10)change_admin;;
+11)change_repo;;
+12)install_script;;
+13)delete_script;;
+0)exit;;
+*)echo "无效选择";;
 esac
 
 pause
