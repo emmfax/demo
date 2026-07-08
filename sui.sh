@@ -6,19 +6,13 @@ ONE="/usr/local/one.sh"
 SHORT="/usr/local/bin/suio"
 CONF="/usr/local/bin/one.conf"
 SERVICE="s-ui"
-REPO_USER="alireza0"
-REPO_NAME="s-ui"
 SCRIPT_URL="https://sui.upb.cc"
 
-[ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
-[ -t 0 ]||exec </dev/tty
+DEFAULT_REPO_USER="alireza0"
+DEFAULT_REPO_NAME="s-ui"
 
-cleanup(){
-rm -f /tmp/sui.sh /tmp/s-ui.tar.gz
-rm -rf /tmp/s-ui-update
-rm -f /root/sui.sh ./sui.sh
-hash -r 2>/dev/null
-}
+[ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
+[ -c /dev/tty ]&&exec </dev/tty
 
 confirm(){
 case "$(echo "$1"|tr 'a-z' 'A-Z')" in
@@ -27,33 +21,30 @@ Y|YES) return 0;;
 esac
 }
 
+pause(){
+printf "\n按回车返回菜单"
+read -r _
+}
+
 installed(){
 [ -x "$SUI" ]
 }
 
-running(){
-if command -v systemctl >/dev/null;then
-systemctl is-active --quiet "$SERVICE"
-elif command -v rc-service >/dev/null;then
-rc-service "$SERVICE" status >/dev/null 2>&1
-else
-pidof sui >/dev/null 2>&1
-fi
-}
-
 is_systemd(){
-command -v systemctl >/dev/null&&[ -d /run/systemd/system ]
+command -v systemctl >/dev/null 2>&1&&[ -d /run/systemd/system ]
 }
 
 is_openrc(){
-command -v rc-service >/dev/null
+command -v rc-service >/dev/null 2>&1
 }
 
-service_restart(){
+running(){
 if is_systemd;then
-systemctl restart "$SERVICE" >/dev/null 2>&1
+systemctl is-active --quiet "$SERVICE"
 elif is_openrc;then
-rc-service "$SERVICE" restart >/dev/null 2>&1
+rc-service "$SERVICE" status >/dev/null 2>&1
+else
+pidof sui >/dev/null 2>&1
 fi
 }
 
@@ -65,6 +56,8 @@ rc-service "$SERVICE" start >/dev/null 2>&1
 else
 "$SUI" start >/dev/null 2>&1
 fi
+sleep 1
+running
 }
 
 service_stop(){
@@ -77,10 +70,20 @@ else
 fi
 }
 
+service_restart(){
+if is_systemd;then
+systemctl restart "$SERVICE" >/dev/null 2>&1
+elif is_openrc;then
+rc-service "$SERVICE" restart >/dev/null 2>&1
+else
+"$SUI" restart >/dev/null 2>&1
+fi
+}
+
 dep(){
-if command -v apk >/dev/null;then
+if command -v apk >/dev/null 2>&1;then
 apk add --no-cache wget curl tar gzip >/dev/null 2>&1
-elif command -v apt >/dev/null;then
+elif command -v apt >/dev/null 2>&1;then
 apt update >/dev/null 2>&1
 apt install -y wget curl tar gzip >/dev/null 2>&1
 fi
@@ -88,26 +91,35 @@ fi
 
 arch(){
 case "$(uname -m)" in
-x86_64|amd64) echo amd64;;
-aarch64|arm64) echo arm64;;
-*) echo amd64;;
+x86_64|amd64)
+echo amd64
+;;
+aarch64|arm64)
+echo arm64
+;;
+*)
+echo amd64
+;;
 esac
 }
 
 load_local(){
-REPO_USER="alireza0"
-REPO_NAME="s-ui"
+REPO_USER="$DEFAULT_REPO_USER"
+REPO_NAME="$DEFAULT_REPO_NAME"
 PANEL_PORT=""
 SUB_PORT=""
 PANEL_PATH=""
 SUB_PATH=""
+
 [ -f "$CONF" ]&&. "$CONF"
-[ -z "$REPO_USER" ]&&REPO_USER="alireza0"
-[ -z "$REPO_NAME" ]&&REPO_NAME="s-ui"
+
+[ -z "$REPO_USER" ]&&REPO_USER="$DEFAULT_REPO_USER"
+[ -z "$REPO_NAME" ]&&REPO_NAME="$DEFAULT_REPO_NAME"
 }
 
 save_local(){
 mkdir -p /usr/local/bin
+
 cat >"$CONF.tmp" <<EOF
 PANEL_PORT="$PANEL_PORT"
 SUB_PORT="$SUB_PORT"
@@ -116,6 +128,7 @@ SUB_PATH="$SUB_PATH"
 REPO_USER="$REPO_USER"
 REPO_NAME="$REPO_NAME"
 EOF
+
 mv "$CONF.tmp" "$CONF"
 chmod 600 "$CONF"
 }
@@ -127,41 +140,47 @@ sed -i '/^REPO_USER=/d;/^REPO_NAME=/d' "$CONF"
 
 check_port(){
 case "$1" in
-''|*[!0-9]*) return 1;;
+''|*[!0-9]*)
+return 1
+;;
 esac
+
 [ "$1" -ge 1 ]&&[ "$1" -le 65535 ]
 }
 
-pause(){
-printf "按回车返回菜单"
-read _
-}
 service_create(){
 if is_systemd;then
 cat >/etc/systemd/system/s-ui.service <<EOF
 [Unit]
 Description=s-ui
 After=network.target
+
 [Service]
 WorkingDirectory=$BASE
 ExecStart=$SUI
 Restart=always
+
 [Install]
 WantedBy=multi-user.target
 EOF
+
 systemctl daemon-reload
 systemctl enable s-ui >/dev/null 2>&1
+
 elif is_openrc;then
+
 cat >/etc/init.d/s-ui <<EOF
 #!/sbin/openrc-run
 name="s-ui"
 command="$SUI"
 command_background="yes"
 pidfile="/run/s-ui.pid"
+
 depend(){
 need net
 }
 EOF
+
 chmod +x /etc/init.d/s-ui
 rc-update add s-ui default >/dev/null 2>&1
 fi
@@ -170,24 +189,31 @@ fi
 download_sui(){
 load_local
 dep
+
 rm -f /tmp/s-ui.tar.gz
+
 URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/s-ui-linux-$(arch).tar.gz"
+
 wget -qO /tmp/s-ui.tar.gz "$URL"||return 1
+
 mkdir -p "$BASE"
+
 tar -xzf /tmp/s-ui.tar.gz -C "$BASE"||return 1
+
 chmod +x "$SUI"
 }
 
 install_sui(){
 if installed;then
 echo "S-UI已经安装"
+pause
 return
 fi
+
 echo "======================"
 echo "       S-UI安装"
 echo "======================"
 
-read -p "版本 [最新版]: " VER_INPUT
 read -p "面板端口 [2095]: " PANEL_PORT
 PANEL_PORT=${PANEL_PORT:-2095}
 
@@ -222,25 +248,35 @@ fi
 
 while :;do
 read -p "管理员用户名: " USERNAME
-[ -n "$USERNAME" ]&&
-echo "$USERNAME"|grep -Eq '^[a-zA-Z0-9_-]+$'&&break
+
+if [ -n "$USERNAME" ]&&echo "$USERNAME"|grep -Eq '^[a-zA-Z0-9_-]+$';then
+break
+fi
+
 echo "用户名只能包含英文、数字、_、-"
 done
 
 while :;do
 read -p "管理员密码: " PASSWORD
-[ -n "$PASSWORD" ]&&break
+
+if [ -n "$PASSWORD" ];then
+break
+fi
+
 echo "密码不能为空"
 done
 
-echo "正在安装S-UI..."
+echo "正在安装S-UI"
+
 printf "["
+
 i=0
-while [ $i -lt 20 ];do
+while [ "$i" -lt 20 ];do
 printf "#"
 sleep 0.1
 i=$((i+1))
 done
+
 printf "]\n"
 
 if ! download_sui;then
@@ -252,6 +288,8 @@ fi
 "$SUI" setting -port "$PANEL_PORT" >/dev/null 2>&1
 "$SUI" setting -subPort "$SUB_PORT" >/dev/null 2>&1
 "$SUI" setting -path "$PANEL_PATH" >/dev/null 2>&1
+"$SUI" setting -subPath "$SUB_PATH" >/dev/null 2>&1
+
 "$SUI" admin -username "$USERNAME" -password "$PASSWORD" >/dev/null 2>&1
 
 service_create
@@ -271,7 +309,8 @@ install_script
 
 echo
 echo "S-UI安装完成"
-[ -x "$SHORT" ]&&echo "管理命令:suio"
+echo "快捷命令:suio"
+
 pause
 }
 
@@ -283,6 +322,7 @@ return
 fi
 
 read -p "确认卸载S-UI? [Y/N]: " X
+
 confirm "$X"||return
 
 service_stop
@@ -291,13 +331,16 @@ if is_systemd;then
 systemctl disable s-ui >/dev/null 2>&1
 rm -f /etc/systemd/system/s-ui.service
 systemctl daemon-reload
+
 elif is_openrc;then
 rc-update del s-ui default >/dev/null 2>&1
 rm -f /etc/init.d/s-ui
 fi
 
 rm -rf "$BASE"
+
 echo "S-UI卸载完成"
+
 pause
 }
 
@@ -307,7 +350,9 @@ echo "S-UI未安装"
 pause
 return
 fi
+
 service_start&&echo "S-UI启动成功"||echo "S-UI启动失败"
+
 pause
 }
 
@@ -317,7 +362,11 @@ echo "S-UI未安装"
 pause
 return
 fi
-service_stop&&echo "S-UI停止成功"||echo "S-UI停止失败"
+
+service_stop
+
+echo "S-UI停止完成"
+
 pause
 }
 
@@ -330,11 +379,14 @@ fi
 
 if is_systemd;then
 systemctl status s-ui --no-pager -l
+
 elif is_openrc;then
 rc-service s-ui status
+
 else
 pidof sui
 fi
+
 pause
 }
 change_port(){
@@ -343,19 +395,24 @@ echo "S-UI未安装"
 pause
 return
 fi
+
 load_local
+
 echo "当前面板端口:$PANEL_PORT"
+
 while :;do
 read -p "新的面板端口: " P
 check_port "$P"&&break
 echo "端口错误"
 done
+
 "$SUI" setting -port "$P"&&{
 PANEL_PORT="$P"
 [ -f "$CONF" ]&&save_local
 service_restart
 echo "修改完成"
 }
+
 pause
 }
 
@@ -365,19 +422,24 @@ echo "S-UI未安装"
 pause
 return
 fi
+
 load_local
+
 echo "当前订阅端口:$SUB_PORT"
+
 while :;do
 read -p "新的订阅端口: " P
 check_port "$P"&&break
 echo "端口错误"
 done
+
 "$SUI" setting -subPort "$P"&&{
 SUB_PORT="$P"
 [ -f "$CONF" ]&&save_local
 service_restart
 echo "修改完成"
 }
+
 pause
 }
 
@@ -387,16 +449,22 @@ echo "S-UI未安装"
 pause
 return
 fi
+
 load_local
+
 echo "当前面板路径:$PANEL_PATH"
+
 read -p "新的面板路径: " P
+
 [ -z "$P" ]&&return
+
 "$SUI" setting -path "$P"&&{
 PANEL_PATH="$P"
 [ -f "$CONF" ]&&save_local
 service_restart
 echo "修改完成"
 }
+
 pause
 }
 
@@ -406,16 +474,22 @@ echo "S-UI未安装"
 pause
 return
 fi
+
 load_local
+
 echo "当前订阅路径:$SUB_PATH"
+
 read -p "新的订阅路径: " P
+
 [ -z "$P" ]&&return
+
 "$SUI" setting -subPath "$P"&&{
 SUB_PATH="$P"
 [ -f "$CONF" ]&&save_local
 service_restart
 echo "修改完成"
 }
+
 pause
 }
 
@@ -428,80 +502,110 @@ fi
 
 while :;do
 read -p "管理员用户名: " USERNAME
-[ -n "$USERNAME" ]&&echo "$USERNAME"|grep -Eq '^[a-zA-Z0-9_-]+$'&&break
+
+if [ -n "$USERNAME" ]&&echo "$USERNAME"|grep -Eq '^[a-zA-Z0-9_-]+$';then
+break
+fi
+
 echo "用户名只能包含英文、数字、_、-"
 done
 
 while :;do
 read -p "管理员密码: " PASSWORD
-[ -n "$PASSWORD" ]&&break
+
+if [ -n "$PASSWORD" ];then
+break
+fi
+
 echo "密码不能为空"
 done
 
 "$SUI" admin -username "$USERNAME" -password "$PASSWORD"&&echo "修改成功"
+
 pause
 }
 
 change_repo(){
 load_local
+
 echo "当前仓库:$REPO_USER/$REPO_NAME"
 echo
 echo "D.恢复默认仓库"
 echo "Y.持续化保存修改"
 echo "N.返回菜单"
 echo "L.临时修改"
+
 read -p "请选择: " X
 
 case "$(echo "$X"|tr 'a-z' 'A-Z')" in
+
 D)
-REPO_USER="alireza0"
-REPO_NAME="s-ui"
+REPO_USER="$DEFAULT_REPO_USER"
+REPO_NAME="$DEFAULT_REPO_NAME"
+
 clear_repo
+
 echo "已恢复默认仓库"
 ;;
+
 Y)
 read -p "GitHub用户名: " U
 read -p "GitHub仓库: " R
+
 [ -z "$U" ]||[ -z "$R" ]&&{
 echo "输入不能为空"
 pause
 return
 }
+
 REPO_USER="$U"
 REPO_NAME="$R"
+
 save_local
+
 echo "仓库已持续化保存"
 ;;
+
 L)
 read -p "GitHub用户名: " U
 read -p "GitHub仓库: " R
+
 [ -z "$U" ]||[ -z "$R" ]&&return
+
 REPO_USER="$U"
 REPO_NAME="$R"
+
 echo "仓库临时修改完成"
-echo "退出脚本后恢复"
+echo "退出脚本后恢复默认"
 ;;
-N) return;;
-*) echo "无效选择";;
+
+N)
+return
+;;
+
+*)
+echo "无效选择"
+;;
+
 esac
+
 pause
 }
 
 install_script(){
-if [ -x "$ONE" ];then
-wget -qO "$ONE.tmp" "$SCRIPT_URL"&&{
-mv "$ONE.tmp" "$ONE"
-chmod +x "$ONE"
-}
-else
-wget -qO "$ONE" "$SCRIPT_URL"&&chmod +x "$ONE"
-fi
-
 mkdir -p /usr/local/bin
+
+wget -qO "$ONE.tmp" "$SCRIPT_URL"||return 1
+
+mv "$ONE.tmp" "$ONE"
+
+chmod +x "$ONE"
+
 cat >"$SHORT" <<EOF
 #!/bin/sh
 /usr/local/one.sh
 EOF
+
 chmod +x "$SHORT"
 }
 
@@ -511,22 +615,31 @@ echo "管理脚本未安装"
 pause
 return
 fi
+
 install_script
+
 echo "管理脚本升级完成"
+
 pause
 }
 
 remove_script(){
 read -p "确认删除管理脚本? [Y/N]: " X
+
 confirm "$X"||return
+
 rm -f "$ONE" "$SHORT" "$CONF"
+
 hash -r 2>/dev/null
+
 echo "管理脚本删除完成"
+
 pause
 }
 
 menu(){
 clear
+
 echo "======================"
 echo "      s-ui管理器"
 echo "       Ver $VER"
@@ -578,10 +691,17 @@ case "$NUM" in
 12) upgrade_script;;
 13) remove_script;;
 0) exit 0;;
-*) echo "无效选择";pause;;
+*)
+echo "无效选择"
+pause
+;;
 esac
 }
 
+main(){
 while :;do
 menu
 done
+}
+
+main
