@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="0.13"
+VER="0.14"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 ONE="/usr/local/one.sh"
@@ -14,6 +14,7 @@ REPO_NAME="s-ui"
 cleanup(){
 rm -f /tmp/sui.sh /tmp/s-ui.tar.gz
 rm -rf /tmp/s-ui-update
+rm -f ./sui.sh /root/sui.sh
 hash -r 2>/dev/null
 }
 
@@ -77,6 +78,8 @@ cat >/etc/init.d/s-ui <<EOF
 name="s-ui"
 command="$SUI"
 command_background=true
+pidfile="/run/s-ui.pid"
+command_user="root"
 depend(){
 after net
 }
@@ -136,6 +139,10 @@ esac
 wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"&&[ -s /tmp/s-ui.tar.gz ]
 }
 
+download_script(){
+wget -qO "$ONE.tmp" "$SCRIPT_URL"&&[ -s "$ONE.tmp" ]
+}
+
 find_sui(){
 find "$1" -type f -name sui 2>/dev/null|head -1
 }
@@ -187,14 +194,14 @@ while :;do
 read -p "面板端口 [2095]: " PORT
 [ -z "$PORT" ]&&PORT=2095
 check_port "$PORT"&&break
-echo "端口格式错误，请重新输入"
+echo "端口错误，请重新输入"
 done
 
 while :;do
 read -p "订阅端口 [2096]: " SUB
 [ -z "$SUB" ]&&SUB=2096
 check_port "$SUB"&&break
-echo "端口格式错误，请重新输入"
+echo "端口错误，请重新输入"
 done
 
 read -p "面板路径 [app]: " PATHSET
@@ -243,21 +250,30 @@ chmod +x "$SUI"
 
 cd "$BASE"||return
 
-./sui setting -port "$PORT"
-./sui setting -subPort "$SUB"
-./sui setting -path "$PATHSET"
-./sui setting -subPath "$SUBPATH"
+./sui setting -port "$PORT"||echo "面板端口设置失败"
+./sui setting -subPort "$SUB"||echo "订阅端口设置失败"
+./sui setting -path "$PATHSET"||echo "面板路径设置失败"
+./sui setting -subPath "$SUBPATH"||echo "订阅路径设置失败"
 ./sui admin -username "$USER" -password "$PASS"
 
 service_create
 service_enable
 service_start
 
-if wget -qO "$ONE" "$SCRIPT_URL"&&[ -s "$ONE" ];then
+sleep 2
+
+if running;then
+echo "S-UI启动成功"
+else
+echo "S-UI启动失败，请查看状态"
+fi
+
+if download_script;then
+mv "$ONE.tmp" "$ONE"
 chmod +x "$ONE"
 create_suio
 else
-rm -f "$ONE"
+rm -f "$ONE.tmp"
 echo "管理脚本下载失败"
 fi
 
@@ -282,7 +298,7 @@ fi
 service_start
 sleep 2
 
-running&&echo "S-UI运行中"||echo "S-UI启动失败"
+running&&echo "S-UI启动成功"||echo "S-UI启动失败"
 }
 
 stop_sui(){
@@ -311,13 +327,11 @@ fi
 while :;do
 read -p "新的面板端口: " P
 check_port "$P"&&break
-echo "端口格式错误"
+echo "端口错误"
 done
 
 cd "$BASE"
-./sui setting -port "$P"
-service_restart
-echo "修改完成"
+./sui setting -port "$P"&&service_restart&&echo "修改完成"||echo "修改失败"
 }
 
 change_sub(){
@@ -329,13 +343,11 @@ fi
 while :;do
 read -p "新的订阅端口: " P
 check_port "$P"&&break
-echo "端口格式错误"
+echo "端口错误"
 done
 
 cd "$BASE"
-./sui setting -subPort "$P"
-service_restart
-echo "修改完成"
+./sui setting -subPort "$P"&&service_restart&&echo "修改完成"||echo "修改失败"
 }
 
 change_path(){
@@ -348,9 +360,7 @@ read -p "新的面板路径 [app]: " P
 [ -z "$P" ]&&P=app
 
 cd "$BASE"
-./sui setting -path "$P"
-service_restart
-echo "修改完成"
+./sui setting -path "$P"&&service_restart&&echo "修改完成"||echo "修改失败"
 }
 
 change_sub_path(){
@@ -363,9 +373,7 @@ read -p "新的订阅路径 [sub]: " P
 [ -z "$P" ]&&P=sub
 
 cd "$BASE"
-./sui setting -subPath "$P"
-service_restart
-echo "修改完成"
+./sui setting -subPath "$P"&&service_restart&&echo "修改完成"||echo "修改失败"
 }
 change_admin(){
 if ! installed;then
@@ -377,9 +385,7 @@ input_user
 input_pass
 
 cd "$BASE"
-./sui admin -username "$USER" -password "$PASS"
-service_restart
-echo "修改完成"
+./sui admin -username "$USER" -password "$PASS"&&service_restart&&echo "修改完成"||echo "修改失败"
 }
 
 status_sui(){
@@ -389,7 +395,7 @@ return
 fi
 
 echo "======================"
-echo "S-UI服务状态"
+echo "S-UI真实状态"
 echo "======================"
 
 if command -v systemctl >/dev/null;then
@@ -441,6 +447,7 @@ echo "卸载S-UI"
 if command -v systemctl >/dev/null;then
 systemctl stop s-ui >/dev/null 2>&1
 else
+rc-update del s-ui default >/dev/null 2>&1
 chmod +x /etc/init.d/s-ui 2>/dev/null
 rc-service s-ui stop >/dev/null 2>&1
 fi
@@ -456,8 +463,19 @@ echo "S-UI卸载完成"
 }
 
 delete_script(){
+echo "确认删除管理脚本? [y/N]"
+read -r Y
+
+case "$Y" in
+y|Y)
 rm -f "$ONE" "$SHORT"
+echo "管理脚本删除完成"
 exit
+;;
+*)
+echo "取消删除"
+;;
+esac
 }
 
 pause(){
