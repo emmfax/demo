@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="1.9"
+VER="1.9.1"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 ONE="/usr/local/one.sh"
@@ -32,7 +32,7 @@ echo "$1"|grep -q '^[0-9]\+$'||return 1
 }
 
 check_user(){
-echo "$1"|grep -q '^[a-zA-Z0-9_-]\+$'
+[ -n "$1" ]&&echo "$1"|grep -q '^[a-zA-Z0-9_-]\+$'
 }
 
 dep(){
@@ -120,262 +120,128 @@ chmod +x "$SHORT"
 }
 
 cleanup
-download_sui(){
-dep
-case "$(arch)" in
-amd64) FILE="s-ui-linux-amd64.tar.gz";;
-arm64) FILE="s-ui-linux-arm64.tar.gz";;
+#!/bin/sh
+VER="1.9.1"
+BASE="/usr/local/s-ui"
+SUI="$BASE/sui"
+ONE="/usr/local/one.sh"
+SHORT="/usr/local/bin/suio"
+SCRIPT_URL="https://sui.upb.cc"
+REPO_USER="alireza0"
+REPO_NAME="s-ui"
+
+[ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
+[ -t 0 ]||exec </dev/tty
+
+cleanup(){
+rm -f /tmp/sui.sh /tmp/s-ui.tar.gz
+rm -rf /tmp/s-ui-update
+rm -f /root/sui.sh ./sui.sh
+hash -r 2>/dev/null
+}
+
+installed(){
+[ -x "$SUI" ]
+}
+
+running(){
+pidof sui >/dev/null 2>&1
+}
+
+check_port(){
+echo "$1"|grep -q '^[0-9]\+$'||return 1
+[ "$1" -ge 1 ]&&[ "$1" -le 65535 ]
+}
+
+check_user(){
+[ -n "$1" ]&&echo "$1"|grep -q '^[a-zA-Z0-9_-]\+$'
+}
+
+dep(){
+if command -v apk >/dev/null;then
+apk add --no-cache wget curl tar gzip >/dev/null 2>&1
+elif command -v apt >/dev/null;then
+apt update >/dev/null 2>&1
+apt install -y wget curl tar gzip >/dev/null 2>&1
+fi
+}
+
+arch(){
+case "$(uname -m)" in
+x86_64|amd64) echo amd64;;
+aarch64|arm64) echo arm64;;
+*) echo amd64;;
 esac
-wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
 }
 
-find_sui(){
-find "$1" -type f -name sui 2>/dev/null|head -1
-}
-
-install_wait(){
-echo
-echo "正在初始化 S-UI..."
-for i in 1 2 3 4 5
-do
-printf "\r安装进度 ["
-case "$i" in
-1) printf "■    " ;;
-2) printf "■■   " ;;
-3) printf "■■■  " ;;
-4) printf "■■■■ " ;;
-5) printf "■■■■■" ;;
-esac
-printf "]"
-sleep 1
-done
-echo
-}
-
-install_sui(){
-echo "======================"
-echo "s-ui安装 Ver $VER"
-echo "======================"
-
-while :;do
-read -p "面板端口 [2095]: " PORT
-[ -z "$PORT" ]&&PORT=2095
-check_port "$PORT"&&break
-echo "端口格式错误"
-done
-
-while :;do
-read -p "订阅端口 [2096]: " SUB
-[ -z "$SUB" ]&&SUB=2096
-check_port "$SUB"&&break
-echo "端口格式错误"
-done
-
-read -p "面板路径 [app]: " PATHSET
-[ -z "$PATHSET" ]&&PATHSET=app
-
-read -p "订阅路径 [sub]: " SUBPATH
-[ -z "$SUBPATH" ]&&SUBPATH=sub
-
-while :;do
-read -p "管理员用户名: " USER
-check_user "$USER"&&break
-echo "用户名只能包含英文、数字、_、-"
-done
-
-while :;do
-read -p "管理员密码: " PASS
-[ -n "$PASS" ]&&break
-echo "密码不能为空"
-done
-
-install_wait
-
-download_sui||{
-echo "s-ui下载失败"
-return
-}
-
-rm -rf "$BASE"
-mkdir -p "$BASE"
-
-tar zxf /tmp/s-ui.tar.gz -C "$BASE"
-
-if [ -d "$BASE/s-ui" ];then
-mv "$BASE/s-ui"/* "$BASE"/
-rm -rf "$BASE/s-ui"
-fi
-
-F=$(find_sui "$BASE")
-[ -n "$F" ]&&mv "$F" "$SUI"
-
-chmod +x "$SUI"
-
-if ! installed;then
-echo "s-ui安装失败"
-return
-fi
-
-cd "$BASE"
-
-./sui setting -port "$PORT"
-./sui setting -subPort "$SUB"
-./sui setting -path "$PATHSET"
-./sui setting -subPath "$SUBPATH"
-./sui admin -username "$USER" -password "$PASS"
-
-service_create
-service_enable
-service_start
-
-rm -f "$ONE"
-
-if wget -qO "$ONE" "$SCRIPT_URL"&&[ -s "$ONE" ];then
-chmod +x "$ONE"
-create_suio
+service_create(){
+if command -v systemctl >/dev/null;then
+cat >/etc/systemd/system/s-ui.service <<EOF
+[Unit]
+Description=s-ui
+After=network.target
+[Service]
+WorkingDirectory=/usr/local/s-ui
+ExecStart=/usr/local/s-ui/sui
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
 else
-rm -f "$ONE"
-echo "管理脚本下载失败"
-fi
-
-cleanup
-
-echo
-echo "s-ui安装完成"
-[ -x "$SHORT" ]&&echo "快捷命令:suio"
+cat >/etc/init.d/s-ui <<EOF
+#!/sbin/openrc-run
+name="s-ui"
+command="/usr/local/s-ui/sui"
+command_background=true
+pidfile="/run/s-ui.pid"
+depend(){
+after net
 }
-
-start_sui(){
-if ! installed;then
-echo "S-UI未安装"
-return
-fi
-
-if running;then
-echo "S-UI正在运行"
-return
-fi
-
-service_start
-sleep 2
-
-if running;then
-echo "S-UI运行中"
-else
-echo "S-UI启动失败"
+EOF
+chmod +x /etc/init.d/s-ui
 fi
 }
 
-stop_sui(){
-if ! installed;then
-echo "S-UI未安装"
-return
+service_enable(){
+if command -v systemctl >/dev/null;then
+systemctl enable s-ui >/dev/null 2>&1
+elif command -v rc-update >/dev/null;then
+rc-update add s-ui default >/dev/null 2>&1
 fi
+}
 
-if ! running;then
-echo "S-UI未运行"
-return
+service_start(){
+if command -v systemctl >/dev/null;then
+systemctl start s-ui
+elif command -v rc-service >/dev/null;then
+rc-service s-ui start
 fi
+}
 
+service_stop(){
+if command -v systemctl >/dev/null;then
+systemctl stop s-ui
+elif command -v rc-service >/dev/null;then
+rc-service s-ui stop
+fi
+}
+
+service_restart(){
 service_stop
 sleep 1
-
-if running;then
-echo "S-UI停止失败"
-else
-echo "S-UI未运行"
-fi
+service_start
 }
 
-change_port(){
-if ! installed;then
-echo "S-UI未安装"
-return
-fi
-
-while :;do
-read -p "新的面板端口: " P
-check_port "$P"&&break
-echo "端口格式错误"
-done
-
-cd "$BASE"
-./sui setting -port "$P"
-service_restart
-echo "修改完成"
+create_suio(){
+cat >"$SHORT" <<EOF
+#!/bin/sh
+/usr/local/one.sh
+EOF
+chmod +x "$SHORT"
 }
 
-change_sub(){
-if ! installed;then
-echo "S-UI未安装"
-return
-fi
-
-while :;do
-read -p "新的订阅端口: " P
-check_port "$P"&&break
-echo "端口格式错误"
-done
-
-cd "$BASE"
-./sui setting -subPort "$P"
-service_restart
-echo "修改完成"
-}
-
-change_path(){
-if ! installed;then
-echo "S-UI未安装"
-return
-fi
-
-read -p "新的面板路径 [app]: " P
-[ -z "$P" ]&&P=app
-
-cd "$BASE"
-./sui setting -path "$P"
-service_restart
-echo "修改完成"
-}
-
-change_sub_path(){
-if ! installed;then
-echo "S-UI未安装"
-return
-fi
-
-read -p "新的订阅路径 [sub]: " P
-[ -z "$P" ]&&P=sub
-
-cd "$BASE"
-./sui setting -subPath "$P"
-service_restart
-echo "修改完成"
-}
-
-change_admin(){
-if ! installed;then
-echo "S-UI未安装"
-return
-fi
-
-while :;do
-read -p "管理员用户名: " U
-check_user "$U"&&break
-echo "用户名只能包含英文、数字、_、-"
-done
-
-while :;do
-read -p "管理员密码: " P
-[ -n "$P" ]&&break
-echo "密码不能为空"
-done
-
-cd "$BASE"
-./sui admin -username "$U" -password "$P"
-service_restart
-echo "修改完成"
-}
+cleanup
 status_sui(){
 echo "======================"
 echo "s-ui状态 Ver $VER"
