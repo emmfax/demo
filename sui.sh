@@ -16,8 +16,8 @@ DEFAULT_REPO_NAME="s-ui"
 
 confirm(){
 case "$(echo "$1"|tr 'a-z' 'A-Z')" in
-Y|YES) return 0;;
-*) return 1;;
+Y|YES)return 0;;
+*)return 1;;
 esac
 }
 
@@ -27,7 +27,7 @@ read -r _
 }
 
 installed(){
-[ -x "$SUI" ]
+[ -f "$SUI" ]
 }
 
 is_systemd(){
@@ -140,16 +140,68 @@ sed -i '/^REPO_USER=/d;/^REPO_NAME=/d' "$CONF"
 
 check_port(){
 case "$1" in
-''|*[!0-9]*)
-return 1
-;;
+''|*[!0-9]*)return 1;;
 esac
 
 [ "$1" -ge 1 ]&&[ "$1" -le 65535 ]
 }
 
+select_version(){
+echo "请选择S-UI版本"
+echo "1. 最新版本"
+echo "2. 指定版本"
+
+read -p "请选择 [1]: " V
+
+case "$V" in
+2)
+read -p "输入版本号: " VERSION
+;;
+*)
+VERSION="latest"
+;;
+esac
+}
+download_sui(){
+load_local
+dep
+
+rm -f /tmp/s-ui.tar.gz
+rm -rf /tmp/s-ui
+
+if [ "$VERSION" = "latest" ];then
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/s-ui-linux-$(arch).tar.gz"
+else
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/download/$VERSION/s-ui-linux-$(arch).tar.gz"
+fi
+
+echo "下载:"
+echo "$URL"
+
+wget -qO /tmp/s-ui.tar.gz "$URL"||return 1
+
+mkdir -p /tmp/s-ui
+
+tar -xzf /tmp/s-ui.tar.gz -C /tmp||return 1
+
+rm -rf "$BASE"
+
+mkdir -p "$BASE"
+
+if [ -d "/tmp/s-ui/s-ui" ];then
+cp -r /tmp/s-ui/s-ui/* "$BASE"/
+else
+cp -r /tmp/s-ui/* "$BASE"/
+fi
+
+chmod +x "$SUI"
+
+[ -f "$SUI" ]||return 1
+}
+
 service_create(){
 if is_systemd;then
+
 cat >/etc/systemd/system/s-ui.service <<EOF
 [Unit]
 Description=s-ui
@@ -183,24 +235,8 @@ EOF
 
 chmod +x /etc/init.d/s-ui
 rc-update add s-ui default >/dev/null 2>&1
+
 fi
-}
-
-download_sui(){
-load_local
-dep
-
-rm -f /tmp/s-ui.tar.gz
-
-URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/s-ui-linux-$(arch).tar.gz"
-
-wget -qO /tmp/s-ui.tar.gz "$URL"||return 1
-
-mkdir -p "$BASE"
-
-tar -xzf /tmp/s-ui.tar.gz -C "$BASE"||return 1
-
-chmod +x "$SUI"
 }
 
 install_sui(){
@@ -213,6 +249,8 @@ fi
 echo "======================"
 echo "       S-UI安装"
 echo "======================"
+
+select_version
 
 read -p "面板端口 [2095]: " PANEL_PORT
 PANEL_PORT=${PANEL_PORT:-2095}
@@ -379,10 +417,8 @@ fi
 
 if is_systemd;then
 systemctl status s-ui --no-pager -l
-
 elif is_openrc;then
 rc-service s-ui status
-
 else
 pidof sui
 fi
@@ -397,8 +433,7 @@ return
 fi
 
 load_local
-
-echo "当前面板端口:$PANEL_PORT"
+echo "当前面板端口:${PANEL_PORT:-未知}"
 
 while :;do
 read -p "新的面板端口: " P
@@ -424,8 +459,7 @@ return
 fi
 
 load_local
-
-echo "当前订阅端口:$SUB_PORT"
+echo "当前订阅端口:${SUB_PORT:-未知}"
 
 while :;do
 read -p "新的订阅端口: " P
@@ -451,8 +485,7 @@ return
 fi
 
 load_local
-
-echo "当前面板路径:$PANEL_PATH"
+echo "当前面板路径:${PANEL_PATH:-未知}"
 
 read -p "新的面板路径: " P
 
@@ -476,8 +509,7 @@ return
 fi
 
 load_local
-
-echo "当前订阅路径:$SUB_PATH"
+echo "当前订阅路径:${SUB_PATH:-未知}"
 
 read -p "新的订阅路径: " P
 
@@ -513,9 +545,7 @@ done
 while :;do
 read -p "管理员密码: " PASSWORD
 
-if [ -n "$PASSWORD" ];then
-break
-fi
+[ -n "$PASSWORD" ]&&break
 
 echo "密码不能为空"
 done
@@ -532,8 +562,8 @@ echo "当前仓库:$REPO_USER/$REPO_NAME"
 echo
 echo "D.恢复默认仓库"
 echo "Y.持续化保存修改"
-echo "N.返回菜单"
 echo "L.临时修改"
+echo "N.返回菜单"
 
 read -p "请选择: " X
 
@@ -576,7 +606,6 @@ REPO_USER="$U"
 REPO_NAME="$R"
 
 echo "仓库临时修改完成"
-echo "退出脚本后恢复默认"
 ;;
 
 N)
@@ -677,24 +706,21 @@ echo "0. 退出"
 read -p "请选择: " NUM
 
 case "$NUM" in
-1) start_sui;;
-2) stop_sui;;
-3) install_sui;;
-4) uninstall_sui;;
-5) status_sui;;
-6) change_port;;
-7) change_sub;;
-8) change_path;;
-9) change_sub_path;;
-10) change_admin;;
-11) change_repo;;
-12) upgrade_script;;
-13) remove_script;;
-0) exit 0;;
-*)
-echo "无效选择"
-pause
-;;
+1)start_sui;;
+2)stop_sui;;
+3)install_sui;;
+4)uninstall_sui;;
+5)status_sui;;
+6)change_port;;
+7)change_sub;;
+8)change_path;;
+9)change_sub_path;;
+10)change_admin;;
+11)change_repo;;
+12)upgrade_script;;
+13)remove_script;;
+0)exit 0;;
+*)echo "无效选择";pause;;
 esac
 }
 
