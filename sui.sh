@@ -1,7 +1,8 @@
 #!/bin/sh
-VER="0.14"
+VER="0.15"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
+SERVICE="s-ui"
 ONE="/usr/local/one.sh"
 SHORT="/usr/local/bin/suio"
 SCRIPT_URL="https://sui.upb.cc"
@@ -11,15 +12,24 @@ REPO_NAME="s-ui"
 [ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
 [ -t 0 ]||exec </dev/tty
 
+is_systemd(){
+command -v systemctl >/dev/null
+}
+
+is_openrc(){
+command -v rc-service >/dev/null
+}
+
 cleanup(){
 rm -f /tmp/sui.sh /tmp/s-ui.tar.gz
 rm -rf /tmp/s-ui-update
+rm -f "$ONE.tmp"
 rm -f ./sui.sh /root/sui.sh
 hash -r 2>/dev/null
 }
 
 installed(){
-[ -d "$BASE" ]&&[ -x "$SUI" ]
+[ -x "$SUI" ]
 }
 
 running(){
@@ -41,6 +51,10 @@ case "$1" in
 esac
 }
 
+check_file(){
+grep -q "#!/bin/sh" "$1" 2>/dev/null
+}
+
 dep(){
 if command -v apk >/dev/null;then
 apk add --no-cache wget curl tar gzip >/dev/null 2>&1
@@ -59,10 +73,10 @@ esac
 }
 
 service_create(){
-if command -v systemctl >/dev/null;then
-cat >/etc/systemd/system/s-ui.service <<EOF
+if is_systemd;then
+cat >/etc/systemd/system/$SERVICE.service <<EOF
 [Unit]
-Description=s-ui
+Description=$SERVICE
 After=network.target
 [Service]
 WorkingDirectory=$BASE
@@ -73,44 +87,44 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 else
-cat >/etc/init.d/s-ui <<EOF
+cat >/etc/init.d/$SERVICE <<EOF
 #!/sbin/openrc-run
-name="s-ui"
+name="$SERVICE"
 command="$SUI"
 command_background=true
-pidfile="/run/s-ui.pid"
+pidfile="/run/$SERVICE.pid"
 command_user="root"
 depend(){
 after net
 }
 EOF
-chmod +x /etc/init.d/s-ui
+chmod +x /etc/init.d/$SERVICE
 fi
 }
 
 service_enable(){
-if command -v systemctl >/dev/null;then
-systemctl enable s-ui >/dev/null 2>&1
+if is_systemd;then
+systemctl enable $SERVICE >/dev/null 2>&1
 elif command -v rc-update >/dev/null;then
-rc-update add s-ui default >/dev/null 2>&1
+rc-update add $SERVICE default >/dev/null 2>&1
 fi
 }
 
 service_start(){
-if command -v systemctl >/dev/null;then
-systemctl start s-ui
-elif command -v rc-service >/dev/null;then
-chmod +x /etc/init.d/s-ui 2>/dev/null
-rc-service s-ui start
+if is_systemd;then
+systemctl start $SERVICE
+elif is_openrc;then
+chmod +x /etc/init.d/$SERVICE 2>/dev/null
+rc-service $SERVICE start
 fi
 }
 
 service_stop(){
-if command -v systemctl >/dev/null;then
-systemctl stop s-ui >/dev/null 2>&1
-elif command -v rc-service >/dev/null;then
-chmod +x /etc/init.d/s-ui 2>/dev/null
-rc-service s-ui stop >/dev/null 2>&1
+if is_systemd;then
+systemctl stop $SERVICE >/dev/null 2>&1
+elif is_openrc;then
+chmod +x /etc/init.d/$SERVICE 2>/dev/null
+rc-service $SERVICE stop >/dev/null 2>&1
 fi
 }
 
@@ -121,7 +135,7 @@ service_start
 }
 
 create_suio(){
-[ -f "$ONE" ]||return
+[ -x "$ONE" ]||return
 cat >"$SHORT" <<EOF
 #!/bin/sh
 /usr/local/one.sh
@@ -139,8 +153,18 @@ esac
 wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"&&[ -s /tmp/s-ui.tar.gz ]
 }
 
-download_script(){
-wget -qO "$ONE.tmp" "$SCRIPT_URL"&&[ -s "$ONE.tmp" ]
+install_script(){
+echo "安装/升级管理脚本"
+
+if wget -qO "$ONE.tmp" "$SCRIPT_URL"&&[ -s "$ONE.tmp" ]&&check_file "$ONE.tmp";then
+mv "$ONE.tmp" "$ONE"
+chmod +x "$ONE"
+create_suio
+echo "管理脚本安装完成"
+else
+rm -f "$ONE.tmp"
+echo "管理脚本下载失败"
+fi
 }
 
 find_sui(){
@@ -169,7 +193,7 @@ input_user(){
 while :;do
 read -p "管理员用户名: " USER
 if [ -z "$USER" ];then
-echo "用户名不能为空，请重新输入"
+echo "用户名不能为空"
 continue
 fi
 check_user "$USER"&&break
@@ -181,11 +205,16 @@ input_pass(){
 while :;do
 read -p "管理员密码: " PASS
 [ -n "$PASS" ]&&break
-echo "密码不能为空，请重新输入"
+echo "密码不能为空"
 done
 }
 
 install_sui(){
+if installed;then
+read -p "S-UI已安装，继续覆盖? [y/N]: " X
+[ "$X" = "y" ]||[ "$X" = "Y" ]||return
+fi
+
 echo "======================"
 echo "s-ui安装 Ver $VER"
 echo "======================"
@@ -194,14 +223,14 @@ while :;do
 read -p "面板端口 [2095]: " PORT
 [ -z "$PORT" ]&&PORT=2095
 check_port "$PORT"&&break
-echo "端口错误，请重新输入"
+echo "端口错误"
 done
 
 while :;do
 read -p "订阅端口 [2096]: " SUB
 [ -z "$SUB" ]&&SUB=2096
 check_port "$SUB"&&break
-echo "端口错误，请重新输入"
+echo "端口错误"
 done
 
 read -p "面板路径 [app]: " PATHSET
@@ -250,10 +279,10 @@ chmod +x "$SUI"
 
 cd "$BASE"||return
 
-./sui setting -port "$PORT"||echo "面板端口设置失败"
-./sui setting -subPort "$SUB"||echo "订阅端口设置失败"
-./sui setting -path "$PATHSET"||echo "面板路径设置失败"
-./sui setting -subPath "$SUBPATH"||echo "订阅路径设置失败"
+./sui setting -port "$PORT"
+./sui setting -subPort "$SUB"
+./sui setting -path "$PATHSET"
+./sui setting -subPath "$SUBPATH"
 ./sui admin -username "$USER" -password "$PASS"
 
 service_create
@@ -268,14 +297,7 @@ else
 echo "S-UI启动失败，请查看状态"
 fi
 
-if download_script;then
-mv "$ONE.tmp" "$ONE"
-chmod +x "$ONE"
-create_suio
-else
-rm -f "$ONE.tmp"
-echo "管理脚本下载失败"
-fi
+install_script
 
 cleanup
 
@@ -398,11 +420,11 @@ echo "======================"
 echo "S-UI真实状态"
 echo "======================"
 
-if command -v systemctl >/dev/null;then
-systemctl status s-ui --no-pager
-elif command -v rc-service >/dev/null;then
-chmod +x /etc/init.d/s-ui 2>/dev/null
-rc-service s-ui status
+if is_systemd;then
+systemctl status $SERVICE --no-pager
+elif is_openrc;then
+chmod +x /etc/init.d/$SERVICE 2>/dev/null
+rc-service $SERVICE status
 else
 echo "无法检测服务状态"
 fi
@@ -418,24 +440,6 @@ read -p "GitHub仓库 [$REPO_NAME]: " R
 echo "修改完成"
 }
 
-update_script(){
-if [ ! -f "$ONE" ];then
-echo "管理脚本未安装"
-return
-fi
-
-echo "升级管理脚本"
-
-if wget -qO "$ONE.tmp" "$SCRIPT_URL"&&[ -s "$ONE.tmp" ];then
-mv "$ONE.tmp" "$ONE"
-chmod +x "$ONE"
-echo "升级完成"
-else
-rm -f "$ONE.tmp"
-echo "升级失败"
-fi
-}
-
 uninstall_sui(){
 if ! installed;then
 echo "S-UI未安装"
@@ -444,18 +448,18 @@ fi
 
 echo "卸载S-UI"
 
-if command -v systemctl >/dev/null;then
-systemctl stop s-ui >/dev/null 2>&1
+if is_systemd;then
+systemctl stop $SERVICE >/dev/null 2>&1
+systemctl disable $SERVICE >/dev/null 2>&1
 else
-rc-update del s-ui default >/dev/null 2>&1
-chmod +x /etc/init.d/s-ui 2>/dev/null
-rc-service s-ui stop >/dev/null 2>&1
+command -v rc-update >/dev/null&&rc-update del $SERVICE default >/dev/null 2>&1
+is_openrc&&chmod +x /etc/init.d/$SERVICE 2>/dev/null&&rc-service $SERVICE stop >/dev/null 2>&1
 fi
 
 rm -rf "$BASE"
-rm -f /etc/systemd/system/s-ui.service
-rm -f /etc/init.d/s-ui
-rm -f /run/s-ui.pid
+rm -f /etc/systemd/system/$SERVICE.service
+rm -f /etc/init.d/$SERVICE
+rm -f /run/$SERVICE.pid
 
 systemctl daemon-reload 2>/dev/null
 
@@ -464,11 +468,12 @@ echo "S-UI卸载完成"
 
 delete_script(){
 echo "确认删除管理脚本? [y/N]"
-read -r Y
+read -r X
 
-case "$Y" in
+case "$X" in
 y|Y)
 rm -f "$ONE" "$SHORT"
+hash -r 2>/dev/null
 echo "管理脚本删除完成"
 exit
 ;;
@@ -516,7 +521,7 @@ echo "8. 修改面板路径"
 echo "9. 修改订阅路径"
 echo "10. 修改管理员账号密码"
 echo "11. 修改安装仓库"
-echo "12. 升级管理脚本"
+echo "12. 安装/升级管理脚本"
 echo "13. 删除管理脚本"
 echo
 echo "0. 退出"
@@ -535,7 +540,7 @@ case "$N" in
 9) change_sub_path;;
 10) change_admin;;
 11) change_repo;;
-12) update_script;;
+12) install_script;;
 13) delete_script;;
 0) exit;;
 *) echo "错误选择";;
