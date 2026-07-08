@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="0.18"
+VER="0.19"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 SERVICE="s-ui"
@@ -8,6 +8,7 @@ SHORT="/usr/local/bin/suio"
 SCRIPT_URL="https://sui.upb.cc"
 REPO_USER="alireza0"
 REPO_NAME="s-ui"
+VERSION=""
 
 [ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
 [ -t 0 ]||[ -c /dev/tty ]&&exec </dev/tty
@@ -156,11 +157,19 @@ chmod +x "$SHORT"
 cleanup
 download_sui(){
 dep
+
 case "$(arch)" in
 amd64)FILE="s-ui-linux-amd64.tar.gz";;
 arm64)FILE="s-ui-linux-arm64.tar.gz";;
 esac
-wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"&&check_tar /tmp/s-ui.tar.gz
+
+if [ -n "$VERSION" ];then
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/download/$VERSION/$FILE"
+else
+URL="https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
+fi
+
+wget -qO /tmp/s-ui.tar.gz "$URL"&&check_tar /tmp/s-ui.tar.gz
 }
 
 install_script(){
@@ -235,6 +244,8 @@ echo "======================"
 echo "s-ui安装 Ver $VER"
 echo "======================"
 
+read -p "版本 [最新版]: " VERSION
+
 while :;do
 read -p "面板端口 [2095]: " PORT
 [ -z "$PORT" ]&&PORT=2095
@@ -303,6 +314,8 @@ cd "$BASE"||return
 
 service_create
 service_enable
+
+echo "正在启动S-UI..."
 service_start
 
 if wait_start;then
@@ -318,9 +331,6 @@ cleanup
 echo
 echo "S-UI安装完成"
 [ -x "$SHORT" ]&&echo "管理命令:suio"
-
-printf "按回车返回菜单"
-read _
 }
 
 start_sui(){
@@ -329,8 +339,12 @@ echo "S-UI未安装"
 return
 fi
 
-running&&echo "S-UI已经运行"&&return
+if running;then
+echo "S-UI已经运行"
+return
+fi
 
+echo "正在启动S-UI..."
 service_start
 
 if wait_start;then
@@ -346,15 +360,20 @@ echo "S-UI未安装"
 return
 fi
 
-running||{
+if ! running;then
 echo "S-UI未运行"
 return
-}
+fi
 
+echo "正在停止S-UI..."
 service_stop
 sleep 1
 
-running&&echo "S-UI停止失败"||echo "S-UI已停止"
+if running;then
+echo "S-UI停止失败"
+else
+echo "S-UI停止成功"
+fi
 }
 
 change_port(){
@@ -471,7 +490,7 @@ echo "取消卸载"
 return
 }
 
-echo "卸载S-UI"
+echo "正在卸载S-UI..."
 
 if is_systemd;then
 systemctl stop $SERVICE >/dev/null 2>&1
@@ -495,7 +514,7 @@ delete_script(){
 read -p "确认卸载管理脚本? [Y/N]: " X
 
 confirm "$X"||{
-echo "取消删除"
+echo "取消卸载"
 return
 }
 
