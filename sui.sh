@@ -423,7 +423,7 @@ echo "======================"
 if is_systemd;then
 systemctl status $SERVICE --no-pager
 elif is_openrc;then
-[ -f /etc/init.d/$SERVICE ]&&rc-service $SERVICE status||echo "服务未注册"
+[ -f /etc/init.d/$SERVICE ]&&rc-service $SERVICE status||echo "未运行"
 else
 echo "无法检测服务状态"
 fi
