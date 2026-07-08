@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="0.12"
+VER="0.13"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 ONE="/usr/local/one.sh"
@@ -22,7 +22,7 @@ installed(){
 }
 
 running(){
-pidof sui >/dev/null 2>&1||pgrep -f "$SUI" >/dev/null 2>&1
+pgrep -f "$SUI" >/dev/null 2>&1
 }
 
 check_port(){
@@ -77,7 +77,6 @@ cat >/etc/init.d/s-ui <<EOF
 name="s-ui"
 command="$SUI"
 command_background=true
-pidfile="/run/s-ui.pid"
 depend(){
 after net
 }
@@ -98,15 +97,17 @@ service_start(){
 if command -v systemctl >/dev/null;then
 systemctl start s-ui
 elif command -v rc-service >/dev/null;then
+chmod +x /etc/init.d/s-ui 2>/dev/null
 rc-service s-ui start
 fi
 }
 
 service_stop(){
 if command -v systemctl >/dev/null;then
-systemctl stop s-ui
+systemctl stop s-ui >/dev/null 2>&1
 elif command -v rc-service >/dev/null;then
-rc-service s-ui stop
+chmod +x /etc/init.d/s-ui 2>/dev/null
+rc-service s-ui stop >/dev/null 2>&1
 fi
 }
 
@@ -143,7 +144,7 @@ install_wait(){
 echo "正在安装S-UI"
 for i in 1 2 3 4 5
 do
-printf "\r进度 ["
+printf "\r安装进度 ["
 case "$i" in
 1) printf "■    ";;
 2) printf "■■   ";;
@@ -157,6 +158,26 @@ done
 echo
 }
 
+input_user(){
+while :;do
+read -p "管理员用户名: " USER
+if [ -z "$USER" ];then
+echo "用户名不能为空，请重新输入"
+continue
+fi
+check_user "$USER"&&break
+echo "用户名只能包含英文、数字、_、-"
+done
+}
+
+input_pass(){
+while :;do
+read -p "管理员密码: " PASS
+[ -n "$PASS" ]&&break
+echo "密码不能为空，请重新输入"
+done
+}
+
 install_sui(){
 echo "======================"
 echo "s-ui安装 Ver $VER"
@@ -166,14 +187,14 @@ while :;do
 read -p "面板端口 [2095]: " PORT
 [ -z "$PORT" ]&&PORT=2095
 check_port "$PORT"&&break
-echo "端口格式错误"
+echo "端口格式错误，请重新输入"
 done
 
 while :;do
 read -p "订阅端口 [2096]: " SUB
 [ -z "$SUB" ]&&SUB=2096
 check_port "$SUB"&&break
-echo "端口格式错误"
+echo "端口格式错误，请重新输入"
 done
 
 read -p "面板路径 [app]: " PATHSET
@@ -182,21 +203,8 @@ read -p "面板路径 [app]: " PATHSET
 read -p "订阅路径 [sub]: " SUBPATH
 [ -z "$SUBPATH" ]&&SUBPATH=sub
 
-while :;do
-read -p "管理员用户名: " USER
-[ -z "$USER" ]&&{
-echo "用户名不能为空"
-continue
-}
-check_user "$USER"&&break
-echo "用户名只能包含英文、数字、_、-"
-done
-
-while :;do
-read -p "管理员密码: " PASS
-[ -n "$PASS" ]&&break
-echo "密码不能为空"
-done
+input_user
+input_pass
 
 install_wait
 
@@ -225,7 +233,7 @@ F=$(find_sui "$BASE")
 
 if [ -z "$F" ];then
 rm -rf "$BASE"
-echo "未找到S-UI程序"
+echo "安装文件错误"
 cleanup
 return
 fi
@@ -267,7 +275,7 @@ return
 fi
 
 if running;then
-echo "S-UI正在运行"
+echo "S-UI已经运行"
 return
 fi
 
@@ -291,7 +299,7 @@ fi
 service_stop
 sleep 1
 
-running&&echo "S-UI停止失败"||echo "S-UI未运行"
+running&&echo "S-UI停止失败"||echo "S-UI已停止"
 }
 
 change_port(){
@@ -365,50 +373,33 @@ echo "S-UI未安装"
 return
 fi
 
-while :;do
-read -p "管理员用户名: " U
-[ -z "$U" ]&&{
-echo "用户名不能为空"
-continue
-}
-check_user "$U"&&break
-echo "用户名只能包含英文、数字、_、-"
-done
-
-while :;do
-read -p "管理员密码: " P
-[ -n "$P" ]&&break
-echo "密码不能为空"
-done
+input_user
+input_pass
 
 cd "$BASE"
-./sui admin -username "$U" -password "$P"
+./sui admin -username "$USER" -password "$PASS"
 service_restart
 echo "修改完成"
 }
 
 status_sui(){
-echo "======================"
-echo "s-ui状态 Ver $VER"
-echo "======================"
-
 if ! installed;then
-echo "安装状态: 未安装"
-echo "运行状态: 未运行"
+echo "S-UI未安装"
 return
 fi
 
-echo "安装状态: 已安装"
+echo "======================"
+echo "S-UI服务状态"
+echo "======================"
 
-if running;then
-echo "运行状态: 运行中"
+if command -v systemctl >/dev/null;then
+systemctl status s-ui --no-pager
+elif command -v rc-service >/dev/null;then
+chmod +x /etc/init.d/s-ui 2>/dev/null
+rc-service s-ui status
 else
-echo "运行状态: 未运行"
+echo "无法检测服务状态"
 fi
-
-echo
-echo "程序路径: $SUI"
-echo "安装目录: $BASE"
 }
 
 change_repo(){
@@ -447,7 +438,12 @@ fi
 
 echo "卸载S-UI"
 
-service_stop
+if command -v systemctl >/dev/null;then
+systemctl stop s-ui >/dev/null 2>&1
+else
+chmod +x /etc/init.d/s-ui 2>/dev/null
+rc-service s-ui stop >/dev/null 2>&1
+fi
 
 rm -rf "$BASE"
 rm -f /etc/systemd/system/s-ui.service
