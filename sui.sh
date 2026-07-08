@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="1.8"
+VER="1.9"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 ONE="/usr/local/one.sh"
@@ -24,6 +24,15 @@ installed(){
 
 running(){
 pidof sui >/dev/null 2>&1
+}
+
+check_port(){
+echo "$1"|grep -q '^[0-9]\+$'||return 1
+[ "$1" -ge 1 ]&&[ "$1" -le 65535 ]
+}
+
+check_user(){
+echo "$1"|grep -q '^[a-zA-Z0-9_-]\+$'
 }
 
 dep(){
@@ -124,23 +133,63 @@ find_sui(){
 find "$1" -type f -name sui 2>/dev/null|head -1
 }
 
+install_wait(){
+echo
+echo "正在初始化 S-UI..."
+for i in 1 2 3 4 5
+do
+printf "\r安装进度 ["
+case "$i" in
+1) printf "■    " ;;
+2) printf "■■   " ;;
+3) printf "■■■  " ;;
+4) printf "■■■■ " ;;
+5) printf "■■■■■" ;;
+esac
+printf "]"
+sleep 1
+done
+echo
+}
+
 install_sui(){
 echo "======================"
 echo "s-ui安装 Ver $VER"
 echo "======================"
 
-read -p "版本 [最新版]: " V
+while :;do
 read -p "面板端口 [2095]: " PORT
 [ -z "$PORT" ]&&PORT=2095
+check_port "$PORT"&&break
+echo "端口格式错误"
+done
+
+while :;do
 read -p "订阅端口 [2096]: " SUB
 [ -z "$SUB" ]&&SUB=2096
+check_port "$SUB"&&break
+echo "端口格式错误"
+done
+
 read -p "面板路径 [app]: " PATHSET
 [ -z "$PATHSET" ]&&PATHSET=app
-read -p "管理员用户名: " USER
-read -p "管理员密码: " PASS
 
-[ -z "$USER" ]&&echo "用户名不能为空"&&return
-[ -z "$PASS" ]&&echo "密码不能为空"&&return
+read -p "订阅路径 [sub]: " SUBPATH
+[ -z "$SUBPATH" ]&&SUBPATH=sub
+
+while :;do
+read -p "管理员用户名: " USER
+check_user "$USER"&&break
+echo "用户名只能包含英文、数字、_、-"
+done
+
+while :;do
+read -p "管理员密码: " PASS
+[ -n "$PASS" ]&&break
+echo "密码不能为空"
+done
+
+install_wait
 
 download_sui||{
 echo "s-ui下载失败"
@@ -158,7 +207,6 @@ rm -rf "$BASE/s-ui"
 fi
 
 F=$(find_sui "$BASE")
-
 [ -n "$F" ]&&mv "$F" "$SUI"
 
 chmod +x "$SUI"
@@ -173,6 +221,7 @@ cd "$BASE"
 ./sui setting -port "$PORT"
 ./sui setting -subPort "$SUB"
 ./sui setting -path "$PATHSET"
+./sui setting -subPath "$SUBPATH"
 ./sui admin -username "$USER" -password "$PASS"
 
 service_create
@@ -181,7 +230,7 @@ service_start
 
 rm -f "$ONE"
 
-if wget -qO "$ONE" "$SCRIPT_URL" && [ -s "$ONE" ];then
+if wget -qO "$ONE" "$SCRIPT_URL"&&[ -s "$ONE" ];then
 chmod +x "$ONE"
 create_suio
 else
@@ -244,7 +293,12 @@ echo "S-UI未安装"
 return
 fi
 
+while :;do
 read -p "新的面板端口: " P
+check_port "$P"&&break
+echo "端口格式错误"
+done
+
 cd "$BASE"
 ./sui setting -port "$P"
 service_restart
@@ -257,7 +311,12 @@ echo "S-UI未安装"
 return
 fi
 
+while :;do
 read -p "新的订阅端口: " P
+check_port "$P"&&break
+echo "端口格式错误"
+done
+
 cd "$BASE"
 ./sui setting -subPort "$P"
 service_restart
@@ -272,8 +331,24 @@ fi
 
 read -p "新的面板路径 [app]: " P
 [ -z "$P" ]&&P=app
+
 cd "$BASE"
 ./sui setting -path "$P"
+service_restart
+echo "修改完成"
+}
+
+change_sub_path(){
+if ! installed;then
+echo "S-UI未安装"
+return
+fi
+
+read -p "新的订阅路径 [sub]: " P
+[ -z "$P" ]&&P=sub
+
+cd "$BASE"
+./sui setting -subPath "$P"
 service_restart
 echo "修改完成"
 }
@@ -284,8 +359,17 @@ echo "S-UI未安装"
 return
 fi
 
+while :;do
 read -p "管理员用户名: " U
+check_user "$U"&&break
+echo "用户名只能包含英文、数字、_、-"
+done
+
+while :;do
 read -p "管理员密码: " P
+[ -n "$P" ]&&break
+echo "密码不能为空"
+done
 
 cd "$BASE"
 ./sui admin -username "$U" -password "$P"
@@ -331,7 +415,7 @@ echo "升级管理脚本"
 
 rm -f "$ONE"
 
-if wget -qO "$ONE" "$SCRIPT_URL" && [ -s "$ONE" ];then
+if wget -qO "$ONE" "$SCRIPT_URL"&&[ -s "$ONE" ];then
 chmod +x "$ONE"
 echo "升级完成"
 else
@@ -392,11 +476,12 @@ echo "4. 卸载 s-ui"
 echo "5. 查看状态"
 echo "6. 修改面板端口"
 echo "7. 修改订阅端口"
-echo "8. 面板路径设置"
-echo "9. 修改管理员账号密码"
-echo "10. 修改安装仓库"
-echo "11. 升级管理脚本"
-echo "12. 删除管理脚本"
+echo "8. 修改面板路径"
+echo "9. 修改订阅路径"
+echo "10. 修改管理员账号密码"
+echo "11. 修改安装仓库"
+echo "12. 升级管理脚本"
+echo "13. 删除管理脚本"
 echo
 echo "0. 退出"
 
@@ -411,10 +496,11 @@ case "$N" in
 6) change_port;;
 7) change_sub;;
 8) change_path;;
-9) change_admin;;
-10) change_repo;;
-11) update_script;;
-12) delete_script;;
+9) change_sub_path;;
+10) change_admin;;
+11) change_repo;;
+12) update_script;;
+13) delete_script;;
 0) exit;;
 *) echo "错误选择";;
 esac
