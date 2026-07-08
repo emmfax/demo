@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="0.16"
+VER="0.17"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 SERVICE="s-ui"
@@ -10,14 +10,14 @@ REPO_USER="alireza0"
 REPO_NAME="s-ui"
 
 [ "$(id -u)" != "0" ]&&echo "请使用root运行"&&exit 1
-[ -t 0 ]||exec </dev/tty
+[ -t 0 ]||[ -c /dev/tty ]&&exec </dev/tty
 
 is_systemd(){
-command -v systemctl >/dev/null
+[ "$(ps -p 1 -o comm= 2>/dev/null)" = "systemd" ]
 }
 
 is_openrc(){
-command -v rc-service >/dev/null
+command -v rc-service >/dev/null&&[ -d /etc/init.d ]
 }
 
 confirm(){
@@ -28,9 +28,8 @@ esac
 }
 
 cleanup(){
-rm -f /tmp/sui.sh /tmp/s-ui.tar.gz
+rm -f /tmp/sui.sh /tmp/s-ui.tar.gz "$ONE.tmp"
 rm -rf /tmp/s-ui-update
-rm -f "$ONE.tmp"
 rm -f ./sui.sh /root/sui.sh
 hash -r 2>/dev/null
 }
@@ -40,7 +39,7 @@ installed(){
 }
 
 running(){
-pgrep -f "$SUI" >/dev/null 2>&1
+[ -x "$SUI" ]&&pgrep -f "$SUI" >/dev/null 2>&1
 }
 
 check_port(){
@@ -60,6 +59,10 @@ esac
 
 check_file(){
 grep -q "#!/bin/sh" "$1" 2>/dev/null
+}
+
+check_tar(){
+tar -tzf "$1" >/dev/null 2>&1
 }
 
 dep(){
@@ -121,7 +124,7 @@ service_start(){
 if is_systemd;then
 systemctl start $SERVICE
 elif is_openrc;then
-chmod +x /etc/init.d/$SERVICE 2>/dev/null
+chmod +x /etc/init.d/$SERVICE
 rc-service $SERVICE start
 fi
 }
@@ -156,7 +159,7 @@ case "$(arch)" in
 amd64)FILE="s-ui-linux-amd64.tar.gz";;
 arm64)FILE="s-ui-linux-arm64.tar.gz";;
 esac
-wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"&&[ -s /tmp/s-ui.tar.gz ]
+wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"&&check_tar /tmp/s-ui.tar.gz
 }
 
 install_script(){
@@ -167,6 +170,7 @@ mv "$ONE.tmp" "$ONE"
 chmod +x "$ONE"
 create_suio
 echo "管理脚本安装完成"
+[ -x "$SHORT" ]&&echo "快捷命令:suio"
 else
 rm -f "$ONE.tmp"
 echo "管理脚本下载失败"
@@ -193,6 +197,15 @@ printf "]"
 sleep 1
 done
 echo
+}
+
+wait_start(){
+for i in 1 2 3 4 5
+do
+running&&return 0
+sleep 1
+done
+return 1
 }
 
 input_user(){
@@ -247,11 +260,11 @@ input_pass
 
 install_wait
 
-if ! download_sui;then
+download_sui||{
 echo "S-UI下载失败"
 cleanup
 return
-fi
+}
 
 rm -rf "$BASE"
 mkdir -p "$BASE"
@@ -292,9 +305,7 @@ service_create
 service_enable
 service_start
 
-sleep 2
-
-if running;then
+if wait_start;then
 echo "S-UI启动成功"
 else
 echo "S-UI启动失败，请查看状态"
@@ -307,6 +318,9 @@ cleanup
 echo
 echo "s-ui安装完成"
 [ -x "$SHORT" ]&&echo "快捷命令:suio"
+
+printf "按回车返回菜单"
+read _
 }
 
 start_sui(){
@@ -318,9 +332,8 @@ fi
 running&&echo "S-UI已经运行"&&return
 
 service_start
-sleep 2
 
-running&&echo "S-UI启动成功"||echo "S-UI启动失败"
+wait_start&&echo "S-UI启动成功"||echo "S-UI启动失败"
 }
 
 stop_sui(){
@@ -423,7 +436,7 @@ echo "======================"
 if is_systemd;then
 systemctl status $SERVICE --no-pager
 elif is_openrc;then
-[ -f /etc/init.d/$SERVICE ]&&rc-service $SERVICE status||echo "未运行"
+[ -f /etc/init.d/$SERVICE ]&&rc-service $SERVICE status||echo "服务未注册"
 else
 echo "无法检测服务状态"
 fi
@@ -487,7 +500,8 @@ exit
 }
 
 pause(){
-read -p "按回车返回菜单"
+printf "按回车返回菜单"
+read _
 }
 
 menu(){
