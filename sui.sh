@@ -1,5 +1,5 @@
 #!/bin/sh
-VER="0.11"
+VER="0.12"
 BASE="/usr/local/s-ui"
 SUI="$BASE/sui"
 ONE="/usr/local/one.sh"
@@ -22,7 +22,7 @@ installed(){
 }
 
 running(){
-pidof sui >/dev/null 2>&1
+pidof sui >/dev/null 2>&1||pgrep -f "$SUI" >/dev/null 2>&1
 }
 
 check_port(){
@@ -64,8 +64,8 @@ cat >/etc/systemd/system/s-ui.service <<EOF
 Description=s-ui
 After=network.target
 [Service]
-WorkingDirectory=/usr/local/s-ui
-ExecStart=/usr/local/s-ui/sui
+WorkingDirectory=$BASE
+ExecStart=$SUI
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -75,7 +75,7 @@ else
 cat >/etc/init.d/s-ui <<EOF
 #!/sbin/openrc-run
 name="s-ui"
-command="/usr/local/s-ui/sui"
+command="$SUI"
 command_background=true
 pidfile="/run/s-ui.pid"
 depend(){
@@ -117,6 +117,7 @@ service_start
 }
 
 create_suio(){
+[ -f "$ONE" ]||return
 cat >"$SHORT" <<EOF
 #!/bin/sh
 /usr/local/one.sh
@@ -131,7 +132,7 @@ case "$(arch)" in
 amd64) FILE="s-ui-linux-amd64.tar.gz";;
 arm64) FILE="s-ui-linux-arm64.tar.gz";;
 esac
-wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"
+wget -qO /tmp/s-ui.tar.gz "https://github.com/$REPO_USER/$REPO_NAME/releases/latest/download/$FILE"&&[ -s /tmp/s-ui.tar.gz ]
 }
 
 find_sui(){
@@ -139,11 +140,10 @@ find "$1" -type f -name sui 2>/dev/null|head -1
 }
 
 install_wait(){
-echo
-echo "正在初始化 S-UI..."
+echo "正在安装S-UI"
 for i in 1 2 3 4 5
 do
-printf "\r安装进度 ["
+printf "\r进度 ["
 case "$i" in
 1) printf "■    ";;
 2) printf "■■   ";;
@@ -200,15 +200,21 @@ done
 
 install_wait
 
-download_sui||{
-echo "s-ui下载失败"
+if ! download_sui;then
+echo "S-UI下载失败"
+cleanup
 return
-}
+fi
 
 rm -rf "$BASE"
 mkdir -p "$BASE"
 
-tar zxf /tmp/s-ui.tar.gz -C "$BASE"
+if ! tar zxf /tmp/s-ui.tar.gz -C "$BASE";then
+rm -rf "$BASE"
+echo "解压失败"
+cleanup
+return
+fi
 
 if [ -d "$BASE/s-ui" ];then
 mv "$BASE/s-ui"/* "$BASE"/
@@ -216,16 +222,18 @@ rm -rf "$BASE/s-ui"
 fi
 
 F=$(find_sui "$BASE")
-[ -n "$F" ]&&mv "$F" "$SUI"
 
-chmod +x "$SUI"
-
-if ! installed;then
-echo "s-ui安装失败"
+if [ -z "$F" ];then
+rm -rf "$BASE"
+echo "未找到S-UI程序"
+cleanup
 return
 fi
 
-cd "$BASE"
+mv "$F" "$SUI"
+chmod +x "$SUI"
+
+cd "$BASE"||return
 
 ./sui setting -port "$PORT"
 ./sui setting -subPort "$SUB"
@@ -236,8 +244,6 @@ cd "$BASE"
 service_create
 service_enable
 service_start
-
-rm -f "$ONE"
 
 if wget -qO "$ONE" "$SCRIPT_URL"&&[ -s "$ONE" ];then
 chmod +x "$ONE"
@@ -268,11 +274,7 @@ fi
 service_start
 sleep 2
 
-if running;then
-echo "S-UI运行中"
-else
-echo "S-UI启动失败"
-fi
+running&&echo "S-UI运行中"||echo "S-UI启动失败"
 }
 
 stop_sui(){
@@ -289,11 +291,7 @@ fi
 service_stop
 sleep 1
 
-if running;then
-echo "S-UI停止失败"
-else
-echo "S-UI未运行"
-fi
+running&&echo "S-UI停止失败"||echo "S-UI未运行"
 }
 
 change_port(){
@@ -361,7 +359,6 @@ cd "$BASE"
 service_restart
 echo "修改完成"
 }
-
 change_admin(){
 if ! installed;then
 echo "S-UI未安装"
@@ -389,6 +386,7 @@ cd "$BASE"
 service_restart
 echo "修改完成"
 }
+
 status_sui(){
 echo "======================"
 echo "s-ui状态 Ver $VER"
@@ -424,15 +422,19 @@ echo "修改完成"
 }
 
 update_script(){
+if [ ! -f "$ONE" ];then
+echo "管理脚本未安装"
+return
+fi
+
 echo "升级管理脚本"
 
-rm -f "$ONE"
-
-if wget -qO "$ONE" "$SCRIPT_URL"&&[ -s "$ONE" ];then
+if wget -qO "$ONE.tmp" "$SCRIPT_URL"&&[ -s "$ONE.tmp" ];then
+mv "$ONE.tmp" "$ONE"
 chmod +x "$ONE"
 echo "升级完成"
 else
-rm -f "$ONE"
+rm -f "$ONE.tmp"
 echo "升级失败"
 fi
 }
@@ -450,6 +452,7 @@ service_stop
 rm -rf "$BASE"
 rm -f /etc/systemd/system/s-ui.service
 rm -f /etc/init.d/s-ui
+rm -f /run/s-ui.pid
 
 systemctl daemon-reload 2>/dev/null
 
@@ -457,8 +460,7 @@ echo "S-UI卸载完成"
 }
 
 delete_script(){
-rm -f "$ONE"
-rm -f "$SHORT"
+rm -f "$ONE" "$SHORT"
 exit
 }
 
@@ -467,6 +469,8 @@ read -p "按回车返回菜单"
 }
 
 menu(){
+while :
+do
 clear
 
 echo "======================"
@@ -524,7 +528,7 @@ case "$N" in
 esac
 
 pause
-menu
+done
 }
 
 menu
